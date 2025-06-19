@@ -1,19 +1,22 @@
+# Housekeeping
 import streamlit as st
 import pandas as pd
 import io
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-st.title("📚 Similar User Stories Matcher")
-st.markdown("Upload two Excel files of user stories to compare and find similar descriptions.")
-# Upload files
+st.title("Similar User Stories Matcher")
+st.markdown("Upload two Excel files of user stories")
+
+# File Upload
 file1 = st.file_uploader("Upload First Excel File", type=["xlsx"])
 file2 = st.file_uploader("Upload Second Excel File", type=["xlsx"])
-# Text inputs for column names
+# Columns
 desc_col1 = st.text_input("Description Column Name in First File", "Desc")
 desc_col2 = st.text_input("Description Column Name in Second File", "Desc")
 id_col1 = st.text_input("ID Column Name in First File", "ID")
 id_col2 = st.text_input("ID Column Name in Second File", "ID")
-# Similarity threshold
+
+# Similarity Threshold Code
 threshold = st.slider("Similarity Threshold (0-1)", 0.0, 1.0, 0.7, 0.05)
 if file1 and file2:
    try:
@@ -49,12 +52,12 @@ if file1 and file2:
                df_results.to_excel(writer, index=False, sheet_name="Results")
            buffer.seek(0)
            st.download_button(
-               label="📥 Download Matching Results",
+               label="Download Matching Results",
                data=buffer,
                file_name="Matching_Stories.xlsx",
                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
            )
        else:
-           st.warning("⚠️ No similar user stories found with the current threshold.")
+           st.warning("No similar user stories found with the current threshold.")
    except Exception as e:
-       st.error(f"❌ Error processing files: {e}")
+       st.error(f"Error processing files: {e}")
