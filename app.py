@@ -45,7 +45,7 @@ if file1 and file2:
                    })
        df_results = pd.DataFrame(matches)
        if not df_results.empty:
-           st.success("✅ Matching complete!")
+           st.success("Matching complete")
            st.dataframe(df_results)
            buffer = io.BytesIO()
            with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
