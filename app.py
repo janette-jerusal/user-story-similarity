@@ -58,7 +58,6 @@ if uploaded_files:
                         "Story B Source": combined_df["Source File"].iloc[j],
                         "Similarity %": round(score * 100, 2)
                     })
-
         results_df = pd.DataFrame(matches)
         if not results_df.empty:
             st.subheader("Matching User Stories")
