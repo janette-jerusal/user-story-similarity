@@ -17,7 +17,7 @@ Upload multiple Excel files of user stories, match similar entries, and download
 # File Upload
 with st.expander("Upload Files ", expanded=True):
     uploaded_files = st.file_uploader(
-        "Upload one or more `.xlsx` files (e.g., Initiate or Manage user stories)",
+        "Upload one or more `.xlsx` user story files.",
         type=["xlsx"],
         accept_multiple_files=True,
         help="You can upload several Excel files. Each will be tagged by its file name."
