@@ -4,7 +4,8 @@ import pandas as pd
 import io
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-st.title("Similar User Stories Matcher")
+st.title("User Story Analysis Tool")
+st.markdown("Scott says name needs work, need an acronymn")
 st.markdown("Upload two Excel files of user stories")
 
 # File Upload
