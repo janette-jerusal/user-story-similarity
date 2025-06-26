@@ -98,7 +98,7 @@ if not results_df.empty:
    col3.metric("Files Uploaded", len(uploaded_file_names))
    # Bar Chart
    match_counts = results_df["Story A Source"].value_counts().add(results_df["Story B Source"].value_counts(), fill_value=0)
-   st.bar_chart(match_counts)
+  
    # Top Match
    top_match = results_df.sort_values(by="Similarity %", ascending=False).iloc[0]
    with st.expander("Top Match", expanded=True):
