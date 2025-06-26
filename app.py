@@ -1,10 +1,10 @@
+# Housekeeping
 import streamlit as st
 import pandas as pd
 import os
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import io
-
 results_df = pd.DataFrame()
 
 # Page Config 
