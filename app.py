@@ -6,7 +6,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import io
 
-# Page
+# Page Config
 st.set_page_config(page_title="User Story Consolidator & Matcher", layout="wide")
 st.title("User Story Analysis Tool")
 
