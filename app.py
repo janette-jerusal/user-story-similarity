@@ -82,4 +82,28 @@ if uploaded_files:
                 st.warning("No matches found above this threshold. Adjust threshold.")
     except Exception as e:
         st.error(f"An error occurred: {e}")
- 
+
+# Visuals
+if not results_df.empty:
+   st.markdown("Highlights of your Selected Comparison Report")
+   total_stories = len(combined_df)
+   total_matches = len(results_df)
+   uploaded_file_names = combined_df["Source File"].unique()
+   # Metrics
+   col1, col2, col3 = st.columns(3)
+   col1.metric("Total User Stories", total_stories)
+   col2.metric("Matched Pairs", total_matches)
+   col3.metric("Files Uploaded", len(uploaded_file_names))
+   # Bar Chart
+   match_counts = results_df["Story A Source"].value_counts().add(results_df["Story B Source"].value_counts(), fill_value=0)
+   st.bar_chart(match_counts)
+   # Top Match
+   top_match = results_df.sort_values(by="Similarity %", ascending=False).iloc[0]
+   with st.expander("Top Match", expanded=True):
+       st.markdown(f"""
+       **Similarity:** {top_match['Similarity %']}%  
+       - **Story A:** `{top_match['Story A ID']}` from `{top_match['Story A Source']}`  
+       - **Story B:** `{top_match['Story B ID']}` from `{top_match['Story B Source']}`  
+       - **Story A Desc:** {top_match['Story A Desc']}  
+       - **Story B Desc:** {top_match['Story B Desc']}  
+       """)
