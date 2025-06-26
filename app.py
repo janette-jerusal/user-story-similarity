@@ -106,6 +106,6 @@ if not results_df.empty:
        **Similarity:** {top_match['Similarity %']}%  
        - **Story A:** `{top_match['Story A ID']}` from `{top_match['Story A Source']}`  
        - **Story B:** `{top_match['Story B ID']}` from `{top_match['Story B Source']}`  
-       - **Story A Desc:** {top_match['Story A Desc']}  
-       - **Story B Desc:** {top_match['Story B Desc']}  
+       - **Story A Desc:** {top_match['Story A Description']}  
+       - **Story B Desc:** {top_match['Story B Description']}  
        """)
