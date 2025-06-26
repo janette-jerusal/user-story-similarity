@@ -1,63 +1,80 @@
-# Housekeeping
+# Housekeeping 
 import streamlit as st
 import pandas as pd
-import io
+import os
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import io
+
+# Page
+st.set_page_config(page_title="User Story Consolidator & Matcher", layout="wide")
 st.title("User Story Analysis Tool")
-st.markdown("Upload two Excel files of user stories")
 
-# File Upload
-file1 = st.file_uploader("Upload First Excel File", type=["xlsx"])
-file2 = st.file_uploader("Upload Second Excel File", type=["xlsx"])
-# Columns
-desc_col1 = st.text_input("Description Column Name in First File", "Desc")
-desc_col2 = st.text_input("Description Column Name in Second File", "Desc")
-id_col1 = st.text_input("ID Column Name in First File", "ID")
-id_col2 = st.text_input("ID Column Name in Second File", "ID")
 
-# Similarity Threshold Code
-threshold = st.slider("Similarity Threshold (0-1)", 0.0, 1.0, 0.7, 0.05)
-if file1 and file2:
-   try:
-       df1 = pd.read_excel(file1, engine="openpyxl")
-       df2 = pd.read_excel(file2, engine="openpyxl")
-       # Extract relevant columns
-       stories1 = df1[[id_col1, desc_col1]].dropna()
-       stories2 = df2[[id_col2, desc_col2]].dropna()
-       # Vectorize descriptions
-       tfidf = TfidfVectorizer().fit(pd.concat([stories1[desc_col1], stories2[desc_col2]]))
-       vec1 = tfidf.transform(stories1[desc_col1])
-       vec2 = tfidf.transform(stories2[desc_col2])
-       # Calculate cosine similarity
-       similarity = cosine_similarity(vec1, vec2)
-       matches = []
-       for i in range(similarity.shape[0]):
-           for j in range(similarity.shape[1]):
-               score = similarity[i, j]
-               if score >= threshold:
-                   matches.append({
-                       f"{id_col1}": stories1.iloc[i][id_col1],
-                       f"{desc_col1}": stories1.iloc[i][desc_col1],
-                       f"{id_col2}": stories2.iloc[j][id_col2],
-                       f"{desc_col2}": stories2.iloc[j][desc_col2],
-                       "Similarity": round(score, 4)
-                   })
-       df_results = pd.DataFrame(matches)
-       if not df_results.empty:
-           st.success("Matching complete")
-           st.dataframe(df_results)
-           buffer = io.BytesIO()
-           with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-               df_results.to_excel(writer, index=False, sheet_name="Results")
-           buffer.seek(0)
-           st.download_button(
-               label="Download Matching Results",
-               data=buffer,
-               file_name="Matching_Stories.xlsx",
-               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-           )
-       else:
-           st.warning("No similar user stories found with the current threshold.")
-   except Exception as e:
-       st.error(f"Error processing files: {e}")
+# Upload multiple files
+uploaded_files = st.file_uploader("Upload One or More Excel Files", type=["xlsx"], accept_multiple_files=True)
+
+# User inputs for column names
+desc_col = st.text_input("Description Column Name", value="Desc")
+id_col = st.text_input("ID Column Name", value="ID")
+
+# Similarity threshold
+threshold = st.slider("Similarity Threshold (%)", 0, 100, 70)
+if uploaded_files:
+
+    try:
+        all_data = []
+        # Loading files and tagging with its file name
+        for uploaded_file in uploaded_files:
+            df = pd.read_excel(uploaded_file)
+            df["Source File"] = os.path.basename(uploaded_file.name)
+            all_data.append(df)
+
+        # Combine into a single DataFrame
+        combined_df = pd.concat(all_data, ignore_index=True)
+        combined_df = combined_df[[id_col, desc_col, "Source File"]].dropna()
+
+        st.subheader("Consolidated Data")
+        st.dataframe(combined_df)
+       
+        # Text stuff
+        descriptions = combined_df[desc_col].astype(str).fillna("")
+        tfidf = TfidfVectorizer().fit(descriptions.tolist())
+        tfidf_matrix = tfidf.transform(descriptions)
+
+        # Cosine similarity with full dataset
+        similarity_matrix = cosine_similarity(tfidf_matrix)
+        matches = []
+        for i in range(len(descriptions)):
+            for j in range(i + 1, len(descriptions)):
+                score = similarity_matrix[i][j]
+                if score * 100 >= threshold:
+                    matches.append({
+                        "Story A ID": combined_df[id_col].iloc[i],
+                        "Story A Desc": descriptions.iloc[i],
+                        "Story A Source": combined_df["Source File"].iloc[i],
+                        "Story B ID": combined_df[id_col].iloc[j],
+                        "Story B Desc": descriptions.iloc[j],
+                        "Story B Source": combined_df["Source File"].iloc[j],
+                        "Similarity %": round(score * 100, 2)
+                    })
+
+        results_df = pd.DataFrame(matches)
+        if not results_df.empty:
+            st.subheader("Matching User Stories")
+            st.dataframe(results_df)
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                results_df.to_excel(writer, index=False, sheet_name="Matches")
+            buffer.seek(0)
+            st.download_button(
+                label="Download Results as Excel",
+                data=buffer,
+                file_name="User_Story_Matches.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.warning("No matches found. Try lowering the threshold.")
+    except Exception as e:
+        st.error(f"Error: {e}")
+ 
