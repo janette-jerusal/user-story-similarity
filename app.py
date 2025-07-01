@@ -72,7 +72,7 @@ if uploaded_files:
     col2.metric("🔍 Matched Pairs", len(result_df))
 
     # Show result table
-    st.subheader("📊 Top Matching User Stories")
+    st.subheader("Top Matching User Stories")
     st.dataframe(result_df, use_container_width=True)
 
     # Download button
@@ -85,6 +85,6 @@ if uploaded_files:
     )
 
 else:
-    st.info("⬆️ Upload one or two Excel files to begin.")
+    st.info("Upload one or two Excel files to begin.")
 
  
