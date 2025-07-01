@@ -6,7 +6,7 @@ import io
 
 # Page config
 st.set_page_config(page_title="User Story Similarity Tool", layout="wide")
-st.title("📚 User Story Similarity Comparison Tool")
+st.title("User Story Similarity Comparison Tool")
 st.markdown("Upload **1 or 2 Excel files** with `ID` and `Desc` columns. The app compares user stories and identifies similar descriptions.")
 
 uploaded_files = st.file_uploader("📤 Upload Excel File(s)", type=["xlsx"], accept_multiple_files=True)
@@ -78,7 +78,7 @@ if uploaded_files:
     # Download button
     excel_data = convert_df_to_excel(result_df)
     st.download_button(
-        label="📥 Download Results as Excel",
+        label="Download Results as Excel",
         data=excel_data,
         file_name="user_story_matches.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
