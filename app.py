@@ -9,7 +9,7 @@ st.set_page_config(page_title="User Story Similarity Tool", layout="wide")
 st.title("User Story Similarity Comparison Tool")
 st.markdown("Upload **1 or 2 Excel files** with `ID` and `Desc` columns. The app compares user stories and identifies similar descriptions.")
 
-uploaded_files = st.file_uploader("📤 Upload Excel File(s)", type=["xlsx"], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Upload Excel File(s)", type=["xlsx"], accept_multiple_files=True)
 
 def load_data(file, source_name):
     df = pd.read_excel(file)
@@ -68,8 +68,8 @@ if uploaded_files:
 
     # Display KPIs
     col1, col2 = st.columns(2)
-    col1.metric("🧾 Total User Stories", len(df1) + len(df2))
-    col2.metric("🔍 Matched Pairs", len(result_df))
+    col1.metric("Total User Stories", len(df1) + len(df2))
+    col2.metric("Matched Pairs", len(result_df))
 
     # Show result table
     st.subheader("Top Matching User Stories")
