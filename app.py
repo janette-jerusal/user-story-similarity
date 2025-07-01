@@ -1,89 +1,85 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import io
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-st.set_page_config(page_title="User Story Similarity Matcher", layout="wide")
-st.title("📄 User Story Similarity Matcher")
-st.markdown("Upload **two Excel files** with user stories. Select the **ID** and **description** columns for each file. The app finds the **top 3 most similar stories (≥ 70%)** from the second file for each story in the first.")
-# Upload files
-file1 = st.file_uploader("Upload First File", type=["xlsx"])
-file2 = st.file_uploader("Upload Second File", type=["xlsx"])
-if file1 and file2:
-   df1 = pd.read_excel(file1)
-   df2 = pd.read_excel(file2)
-   st.subheader("📌 Select Columns for First File")
-   id_col_1 = st.selectbox("Select ID column (File 1)", df1.columns, key="id1")
-   desc_col_1 = st.selectbox("Select Description column (File 1)", df1.columns, key="desc1")
-   st.subheader("📌 Select Columns for Second File")
-   id_col_2 = st.selectbox("Select ID column (File 2)", df2.columns, key="id2")
-   desc_col_2 = st.selectbox("Select Description column (File 2)", df2.columns, key="desc2")
-   if st.button("🔍 Find Top 3 Matches"):
-       try:
-           # TF-IDF vectorization
-           vectorizer = TfidfVectorizer(stop_words="english")
-           tfidf_1 = vectorizer.fit_transform(df1[desc_col_1].astype(str))
-           tfidf_2 = vectorizer.transform(df2[desc_col_2].astype(str))
-           sim_matrix = cosine_similarity(tfidf_1, tfidf_2)
-           # Match results
-           results = []
-           match_counts = {}
-           all_scores = []
-           for i, row in df1.iterrows():
-               top_indices = sim_matrix[i].argsort()[::-1][:3]
-               for idx in top_indices:
-                   score = sim_matrix[i][idx]
-                   all_scores.append(score)
-                   if score >= 0.7:
-                       match_counts[row[id_col_1]] = match_counts.get(row[id_col_1], 0) + 1
-                       results.append({
-                           "File 1 ID": row[id_col_1],
-                           "File 1 Desc": row[desc_col_1],
-                           "File 2 ID": df2.iloc[idx][id_col_2],
-                           "File 2 Desc": df2.iloc[idx][desc_col_2],
-                           "Similarity Score (%)": round(score * 100, 2)
-                       })
-           if results:
-               results_df = pd.DataFrame(results)
-               # Summary dashboard
-               total_file1 = df1.shape[0]
-               matched_stories = len(set(match_counts.keys()))
-               total_matches = len(results_df)
-               st.subheader("📌 Summary")
-               col1, col2, col3 = st.columns(3)
-               col1.metric("Stories in File 1", total_file1)
-               col2.metric("Stories Matched", matched_stories)
-               col3.metric("Total Matches", total_matches)
-               # Results table
-               st.subheader("📋 Matching Results")
-               st.dataframe(results_df)
-               # Histogram of scores
-               st.subheader("📊 Similarity Score Distribution")
-               fig, ax = plt.subplots()
-               ax.hist([s * 100 for s in all_scores], bins=20, color='skyblue', edgecolor='black')
-               ax.set_xlabel("Similarity Score (%)")
-               ax.set_ylabel("Frequency")
-               ax.set_title("Histogram of All Similarity Scores")
-               st.pyplot(fig)
-               # Bar chart of match counts
-               st.subheader("📈 Number of Matches per Story (≥ 70%)")
-               match_df = pd.DataFrame({
-                   "User Story ID": list(match_counts.keys()),
-                   "Number of Matches": list(match_counts.values())
-               })
-               st.bar_chart(match_df.set_index("User Story ID"))
-               # Excel download
-               excel_output = io.BytesIO()
-               with pd.ExcelWriter(excel_output, engine='openpyxl') as writer:
-                   results_df.to_excel(writer, index=False, sheet_name="Top 3 Matches")
-               st.download_button(
-                   label="⬇️ Download Results as Excel",
-                   data=excel_output.getvalue(),
-                   file_name="Top3_Matches_User_Stories.xlsx",
-                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-               )
-           else:
-               st.warning("⚠️ No matches with similarity ≥ 70%. Try different columns or files.")
-       except Exception as e:
-           st.error(f"🚨 Error: {e}")
+import matplotlib.pyplot as plt
+import base64
+from io import BytesIO
+st.set_page_config(page_title="User Story Similarity App", layout="wide")
+st.title("📘 User Story Similarity Checker")
+st.markdown("Upload **one or two Excel files** with user stories. The app will compute similarities and return top matches.")
+uploaded_files = st.file_uploader("Upload 1 or 2 Excel files", type=["xlsx"], accept_multiple_files=True)
+def detect_columns(df):
+   id_col = None
+   desc_col = None
+   for col in df.columns:
+       col_lower = col.lower()
+       if 'id' in col_lower:
+           id_col = col
+       if 'desc' in col_lower:
+           desc_col = col
+   return id_col, desc_col
+def process_and_match(df1, df2, id1, desc1, id2, desc2):
+   tfidf = TfidfVectorizer().fit(pd.concat([df1[desc1], df2[desc2]]))
+   tfidf1 = tfidf.transform(df1[desc1])
+   tfidf2 = tfidf.transform(df2[desc2])
+   similarity = cosine_similarity(tfidf1, tfidf2)
+   results = []
+   for i in range(similarity.shape[0]):
+       top_indices = similarity[i].argsort()[-3:][::-1]
+       for rank, j in enumerate(top_indices, 1):
+           results.append({
+               "Story A ID": df1[id1].iloc[i],
+               "Story A Desc": df1[desc1].iloc[i],
+               "Story B ID": df2[id2].iloc[j],
+               "Story B Desc": df2[desc2].iloc[j],
+               "Similarity Score (%)": round(similarity[i][j] * 100, 2),
+               "Match Rank": rank
+           })
+   return pd.DataFrame(results)
+def create_download_link(df):
+   output = BytesIO()
+   with pd.ExcelWriter(output, engine="openpyxl") as writer:
+       df.to_excel(writer, index=False, sheet_name="Top Matches")
+   output.seek(0)
+   b64 = base64.b64encode(output.read()).decode()
+   return f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="user_story_matches.xlsx">📥 Download Results as Excel</a>'
+if uploaded_files:
+   if len(uploaded_files) == 1:
+       df = pd.read_excel(uploaded_files[0])
+       source_name = uploaded_files[0].name
+       id_col, desc_col = detect_columns(df)
+       if not id_col or not desc_col:
+           st.error("Could not detect 'ID' and 'Description' columns.")
+       else:
+           df['source'] = source_name
+           results_df = process_and_match(df, df, id_col, desc_col, id_col, desc_col)
+   elif len(uploaded_files) == 2:
+       df1 = pd.read_excel(uploaded_files[0])
+       df2 = pd.read_excel(uploaded_files[1])
+       id1, desc1 = detect_columns(df1)
+       id2, desc2 = detect_columns(df2)
+       if not id1 or not desc1 or not id2 or not desc2:
+           st.error("Could not detect 'ID' and 'Description' columns in one or both files.")
+       else:
+           df1['source'] = uploaded_files[0].name
+           df2['source'] = uploaded_files[1].name
+           results_df = process_and_match(df1, df2, id1, desc1, id2, desc2)
+   else:
+       st.error("Please upload only 1 or 2 files.")
+       st.stop()
+   if 'results_df' in locals() and not results_df.empty:
+       st.success("✅ Match results ready!")
+       st.dataframe(results_df)
+       st.markdown(f"**Total Unique User Stories A:** {results_df['Story A ID'].nunique()}")
+       st.markdown(f"**Total Unique Matches Found:** {len(results_df)}")
+       # Visualization
+       match_counts = results_df['Story A ID'].value_counts().value_counts().sort_index()
+       fig, ax = plt.subplots()
+       match_counts.plot(kind='bar', ax=ax)
+       ax.set_xlabel("Number of Matches per Story A")
+       ax.set_ylabel("Count")
+       ax.set_title("Distribution of Match Frequency")
+       st.pyplot(fig)
+       # Download link
+       st.markdown(create_download_link(results_df), unsafe_allow_html=True)
