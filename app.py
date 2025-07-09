@@ -1,67 +1,90 @@
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import matplotlib.pyplot as plt
 import seaborn as sns
-import numpy as np
 
-# Streamlit App UI
-st.title("User Story Similarity Comparator")
-st.write("Upload two Excel files containing user stories (must have 'id' and 'desc' columns).")
+st.set_page_config(page_title="User Story Similarity", layout="wide")
 
-uploaded_file_1 = st.file_uploader("Upload File 1", type=["xlsx"])
-uploaded_file_2 = st.file_uploader("Upload File 2", type=["xlsx"])
+# ---------- File Upload ----------
+st.title("🔍 User Story Similarity Checker")
 
-if uploaded_file_1 and uploaded_file_2:
-    df1 = pd.read_excel(uploaded_file_1, header=0)
-    df2 = pd.read_excel(uploaded_file_2, header=0)
+file1 = st.file_uploader("Upload File 1", type=["csv", "xlsx"])
+file2 = st.file_uploader("Upload File 2", type=["csv", "xlsx"])
 
-    # Normalize column names
-    df1.columns = df1.columns.str.strip().str.lower()
-    df2.columns = df2.columns.str.strip().str.lower()
+similarity_threshold = st.slider("Set Similarity Threshold", 0.0, 1.0, 0.65, step=0.01)
 
-    if "id" not in df1.columns or "desc" not in df1.columns:
-        st.error("File 1 must contain 'id' and 'desc' columns.")
-    elif "id" not in df2.columns or "desc" not in df2.columns:
-        st.error("File 2 must contain 'id' and 'desc' columns.")
-    else:
-        # Vectorization
-        all_descriptions = df1["desc"].tolist() + df2["desc"].tolist()
-        vectorizer = TfidfVectorizer()
-        tfidf_matrix = vectorizer.fit_transform(all_descriptions)
+def read_file(file):
+    try:
+        if file.name.endswith(".csv"):
+            df = pd.read_csv(file)
+        else:
+            df = pd.read_excel(file)
+        df.columns = df.columns.str.strip().str.lower()
+        return df
+    except Exception as e:
+        st.error(f"Error reading file: {e}")
+        return None
 
-        tfidf_1 = tfidf_matrix[:len(df1)]
-        tfidf_2 = tfidf_matrix[len(df1):]
+def compute_similarity(df1, df2, threshold):
+    combined = df1["desc"].tolist() + df2["desc"].tolist()
+    tfidf = TfidfVectorizer().fit_transform(combined)
+    
+    sim_matrix = cosine_similarity(tfidf[:len(df1)], tfidf[len(df1):])
+    
+    max_sim_idx = sim_matrix.argmax(axis=1)
+    max_sim_values = sim_matrix.max(axis=1)
+    
+    result = pd.DataFrame({
+        "File1_ID": df1["id"],
+        "File1_Desc": df1["desc"],
+        "BestMatch_File2_ID": df2.loc[max_sim_idx, "id"].values,
+        "BestMatch_File2_Desc": df2.loc[max_sim_idx, "desc"].values,
+        "Similarity": max_sim_values
+    })
+    
+    return result[result["Similarity"] >= threshold].reset_index(drop=True), sim_matrix
 
-        # Cosine similarity
-        similarity_matrix = cosine_similarity(tfidf_1, tfidf_2)
+# ---------- Process Button ----------
+if file1 and file2:
+    df1 = read_file(file1)
+    df2 = read_file(file2)
 
-        # Build similarity DataFrame
-        result_data = []
-        for i, id1 in enumerate(df1["id"]):
-            for j, id2 in enumerate(df2["id"]):
-                result_data.append({
-                    "ID File 1": id1,
-                    "ID File 2": id2,
-                    "Similarity": similarity_matrix[i][j]
-                })
+    if df1 is not None and df2 is not None:
+        required_cols = {"id", "desc"}
+        if not required_cols.issubset(df1.columns):
+            st.error("❌ File 1 must contain 'id' and 'desc' columns.")
+        elif not required_cols.issubset(df2.columns):
+            st.error("❌ File 2 must contain 'id' and 'desc' columns.")
+        else:
+            st.success("✅ Files successfully loaded!")
+            if st.button("🔍 Compare"):
+                with st.spinner("Computing similarities..."):
+                    results_df, sim_matrix = compute_similarity(df1, df2, similarity_threshold)
 
-        result_df = pd.DataFrame(result_data)
+                st.subheader("🔗 Matching Results")
+                st.dataframe(results_df, use_container_width=True)
 
-        # Show top 10 most similar
-        st.subheader("Top 10 Most Similar User Stories")
-        st.dataframe(result_df.sort_values(by="Similarity", ascending=False).head(10))
+                st.subheader("📊 Similarity Distribution")
+                fig, ax = plt.subplots()
+                sns.histplot(results_df["Similarity"], bins=20, kde=True, ax=ax)
+                ax.axvline(similarity_threshold, color='red', linestyle='--', label='Threshold')
+                ax.set_title("Similarity Score Distribution")
+                ax.set_xlabel("Similarity Score")
+                ax.set_ylabel("Frequency")
+                ax.legend()
+                st.pyplot(fig)
 
-        # KPI: Average Similarity
-        avg_similarity = result_df["Similarity"].mean()
-        st.metric("Average Similarity Score", f"{avg_similarity:.2f}")
+                st.subheader("📈 KPIs")
+                total = len(df1)
+                matched = len(results_df)
+                unmatched = total - matched
+                avg_similarity = results_df["Similarity"].mean() if matched > 0 else 0.0
 
-        # Heatmap
-        st.subheader("Similarity Heatmap")
-        plt.figure(figsize=(10, 6))
-        sns.heatmap(similarity_matrix, cmap="YlGnBu", xticklabels=df2["id"], yticklabels=df1["id"])
-        st.pyplot(plt)
-else:
-    st.warning("Please upload both files to proceed.")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("✅ Matched", f"{matched} / {total}")
+                col2.metric("❌ Unmatched", unmatched)
+                col3.metric("📈 Avg Similarity", f"{avg_similarity:.2f}")
 
