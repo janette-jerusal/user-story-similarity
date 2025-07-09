@@ -2,89 +2,75 @@ import streamlit as st
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import io
 
 # Page config
-st.set_page_config(page_title="User Story Similarity Tool", layout="wide")
-st.title("User Story Similarity Comparison Tool")
-st.markdown("Upload **1 or 2 Excel files** with `ID` and `Desc` columns. The app compares user stories and identifies similar descriptions.")
+st.set_page_config(page_title="User Story Similarity Checker", layout="wide")
 
-uploaded_files = st.file_uploader("Upload Excel File(s)", type=["xlsx"], accept_multiple_files=True)
+st.title("📊 User Story Similarity Checker")
 
-def load_data(file, source_name):
-    df = pd.read_excel(file)
-    df.columns = [col.strip() for col in df.columns]
-    df = df.rename(columns={df.columns[0]: 'ID', df.columns[1]: 'Desc'})
-    df['Source'] = source_name
-    return df
+# Upload files
+uploaded_file_1 = st.file_uploader("Upload File 1 (Excel with 'id' and 'desc')", type=["xlsx"])
+uploaded_file_2 = st.file_uploader("Upload File 2 (Excel with 'id' and 'desc')", type=["xlsx"])
+
+# Set threshold
+similarity_threshold = st.slider("Set Similarity Threshold", min_value=0.0, max_value=1.0, value=0.65, step=0.01)
 
 def compute_similarity(df1, df2, threshold):
-    combined_desc = pd.concat([df1['Desc'], df2['Desc']], ignore_index=True)
+    df1 = df1.dropna(subset=["desc"])
+    df2 = df2.dropna(subset=["desc"])
+
+    combined_desc = pd.concat([df1["desc"], df2["desc"]], ignore_index=True)
     tfidf = TfidfVectorizer().fit_transform(combined_desc)
-    tfidf_df1 = tfidf[:len(df1)]
-    tfidf_df2 = tfidf[len(df1):]
-    similarity_matrix = cosine_similarity(tfidf_df1, tfidf_df2)
 
-    results = []
-    for i, row in enumerate(similarity_matrix):
-        for j, score in enumerate(row):
-            if score >= threshold:
-                results.append({
-                    'Story A ID': df1.iloc[i]['ID'],
-                    'Story A Desc': df1.iloc[i]['Desc'],
-                    'Story B ID': df2.iloc[j]['ID'],
-                    'Story B Desc': df2.iloc[j]['Desc'],
-                    'Similarity Score': round(score, 3)
+    tfidf_1 = tfidf[:len(df1)]
+    tfidf_2 = tfidf[len(df1):]
+
+    sim_matrix = cosine_similarity(tfidf_1, tfidf_2)
+
+    matches = []
+    for i in range(sim_matrix.shape[0]):
+        for j in range(sim_matrix.shape[1]):
+            sim_score = sim_matrix[i, j]
+            if sim_score >= threshold:
+                matches.append({
+                    "File1_ID": df1.iloc[i]["id"],
+                    "File1_Desc": df1.iloc[i]["desc"],
+                    "File2_ID": df2.iloc[j]["id"],
+                    "File2_Desc": df2.iloc[j]["desc"],
+                    "Similarity": round(sim_score, 4)
                 })
-    return pd.DataFrame(results)
 
-def convert_df_to_excel(df):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Top Matches")
-    return output.getvalue()
+    return pd.DataFrame(matches)
 
-if uploaded_files:
-    # Add threshold slider only when files are uploaded
-    similarity_threshold = st.slider(
-        "🔧 Set Similarity Threshold", 
-        min_value=0.0, 
-        max_value=1.0, 
-        value=0.75, 
-        step=0.01
-    )
+# Run comparison
+if uploaded_file_1 and uploaded_file_2:
+    try:
+        df1 = pd.read_excel(uploaded_file_1)
+        df2 = pd.read_excel(uploaded_file_2)
 
-    if len(uploaded_files) == 1:
-        df = load_data(uploaded_files[0], uploaded_files[0].name)
-        df1, df2 = df.copy(), df.copy()
-    elif len(uploaded_files) == 2:
-        df1 = load_data(uploaded_files[0], uploaded_files[0].name)
-        df2 = load_data(uploaded_files[1], uploaded_files[1].name)
-    else:
-        st.error("Please upload only 1 or 2 Excel files.")
-        st.stop()
+        if "id" not in df1.columns or "desc" not in df1.columns:
+            st.error("File 1 must contain 'id' and 'desc' columns.")
+        elif "id" not in df2.columns or "desc" not in df2.columns:
+            st.error("File 2 must contain 'id' and 'desc' columns.")
+        else:
+            result_df = compute_similarity(df1, df2, similarity_threshold)
 
-    result_df = compute_similarity(df1, df2, similarity_threshold)
+            st.success(f"Found {len(result_df)} similar pairs")
 
-    # Display KPIs
-    col1, col2 = st.columns(2)
-    col1.metric("Total User Stories", len(df1) + len(df2))
-    col2.metric("Matched Pairs", len(result_df))
+            # KPIs
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
+            col1.metric("File 1 Records", len(df1))
+            col2.metric("File 2 Records", len(df2))
+            col3.metric("Matches", len(result_df))
+            col4.metric("Avg Similarity", round(result_df["Similarity"].mean(), 4) if not result_df.empty else 0)
+            col5.metric("Max Similarity", round(result_df["Similarity"].max(), 4) if not result_df.empty else 0)
+            col6.metric("Min Similarity", round(result_df["Similarity"].min(), 4) if not result_df.empty else 0)
 
-    # Show result table
-    st.subheader("Top Matching User Stories")
-    st.dataframe(result_df, use_container_width=True)
+            st.dataframe(result_df)
 
-    # Download button
-    excel_data = convert_df_to_excel(result_df)
-    st.download_button(
-        label="Download Results as Excel",
-        data=excel_data,
-        file_name="user_story_matches.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+            # Optional: Download result
+            csv = result_df.to_csv(index=False).encode("utf-8")
+            st.download_button("Download Results as CSV", csv, "similarities.csv", "text/csv")
 
-else:
-    st.info("Upload one or two Excel files to begin.")
-
- 
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
