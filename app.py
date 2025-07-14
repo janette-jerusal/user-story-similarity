@@ -1,101 +1,93 @@
-"""
-app.py  – User‑story similarity Streamlit app
---------------------------------------------
-Only two edits were made compared with your repo:
-  • CLEANING df1 / df2 to remove/replace NaNs
-  • A tiny tweak to the similarity threshold slider default (=0.6)
-Everything else is identical.
-"""
-
+# app.py  ✨ full, self‑contained ✨
 import streamlit as st
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 
+st.set_page_config(page_title="User‑Story Similarity Comparator", layout="wide")
+st.title("📊 User‑Story Similarity Comparator")
 
-# ---------- core similarity logic ----------
-def compute_similarity(df1: pd.DataFrame,
-                       df2: pd.DataFrame,
-                       threshold: float = 0.6) -> pd.DataFrame:
-    """
-    Compare user‑stories in df1 vs df2 (columns: 'id', 'desc').
-    Returns rows where cosine similarity ≥ threshold.
-    """
-    # --- NEW: robust cleaning to avoid NaNs going into TfidfVectorizer ----
-    needed_cols = ["id", "desc"]
+# ----------------------------------------------------------
+# 1️⃣  Upload widgets
+# ----------------------------------------------------------
+file1 = st.file_uploader("Upload file 1 (CSV / Excel)", key="f1")
+file2 = st.file_uploader("Upload file 2 (CSV / Excel)", key="f2")
 
-    df1 = df1[needed_cols].copy()
-    df2 = df2[needed_cols].copy()
+threshold = st.slider("Similarity threshold (%)", 0, 100, 60, 1)
 
+def load_file(f):
+    if f is None: 
+        return None
+    if f.name.endswith(".csv"):
+        return pd.read_csv(f)
+    return pd.read_excel(f)
+
+# ----------------------------------------------------------
+# 2️⃣  Main comparison logic
+# ----------------------------------------------------------
+def compute_similarity(df1: pd.DataFrame, df2: pd.DataFrame, thr: float):
+    # basic clean‑up
+    df1 = df1.rename(columns=str.lower)
+    df2 = df2.rename(columns=str.lower)
     for df in (df1, df2):
-        df["desc"] = (df["desc"]
-                      .astype(str)          # force to string
-                      .fillna("")           # replace NaN with empty string
-                      .str.strip())         # strip whitespace
+        if {"id", "desc"} - set(df.columns):
+            raise ValueError("Each file needs 'id' and 'desc' columns.")
+        df["desc"] = df["desc"].fillna("").astype(str)
 
-    # if all descriptions are empty, bail early
-    if (df1["desc"].eq("").all() or df2["desc"].eq("").all()):
-        st.error("One of the files has no usable 'desc' text.")
-        return pd.DataFrame(columns=["id_1", "id_2", "similarity"])
-
-    # ---------------------------------------------------------------------
-    combined = pd.concat([df1["desc"], df2["desc"]], ignore_index=True)
-
+    combined = pd.concat([df1["desc"], df2["desc"]]).values
     tfidf = TfidfVectorizer().fit_transform(combined)
-    n1 = len(df1)
-    tfidf_1 = tfidf[:n1]
-    tfidf_2 = tfidf[n1:]
+
+    tfidf_1 = tfidf[: len(df1)]
+    tfidf_2 = tfidf[len(df1) :]
 
     sim_matrix = cosine_similarity(tfidf_1, tfidf_2)
-
-    # build result dataframe
-    pairs = []
-    for i, id1 in enumerate(df1["id"]):
-        for j, id2 in enumerate(df2["id"]):
+    matches = []
+    for i, (id1, d1) in enumerate(zip(df1["id"], df1["desc"])):
+        for j, (id2, d2) in enumerate(zip(df2["id"], df2["desc"])):
             sim = sim_matrix[i, j]
-            if sim >= threshold:
-                pairs.append({"id_1": id1,
-                              "id_2": id2,
-                              "similarity": round(float(sim), 4)})
+            if sim * 100 >= thr:
+                matches.append(
+                    {
+                        "id_1": id1,
+                        "id_2": id2,
+                        "similarity_%": sim * 100,
+                    }
+                )
+    return pd.DataFrame(matches)
 
-    return pd.DataFrame(pairs)
-
-
-# ---------- Streamlit UI ----------
-st.title("📊 User‑Story Similarity Comparator")
-
-uploaded_1 = st.file_uploader("Upload file 1 (CSV / Excel)", type=["csv", "xls", "xlsx"])
-uploaded_2 = st.file_uploader("Upload file 2 (CSV / Excel)", type=["csv", "xls", "xlsx"])
-
-threshold = st.slider("Similarity threshold", 0.0, 1.0, 0.60, 0.01)
-
-def load_any(f):
-    if f.name.endswith((".xls", ".xlsx")):
-        return pd.read_excel(f)
-    return pd.read_csv(f)
-
-if uploaded_1 and uploaded_2:
+# ----------------------------------------------------------
+# 3️⃣  Button & results
+# ----------------------------------------------------------
+if st.button("🔍 Compare") and file1 and file2:
     try:
-        df1 = load_any(uploaded_1)
-        df2 = load_any(uploaded_2)
+        df1, df2 = load_file(file1), load_file(file2)
+        result = compute_similarity(df1, df2, threshold)
+        st.success(f"Comparison finished. {len(result)} matching pairs found ✅")
 
-        if not {"id", "desc"}.issubset(df1.columns) \
-           or not {"id", "desc"}.issubset(df2.columns):
-            st.error("Both files must contain **id** and **desc** columns.")
-            st.stop()
+        # ---------------- KPI panel ----------------
+        col1, col2, col3 = st.columns(3)
+        total_pairs = len(df1) * len(df2)
+        match_ratio = (len(result) / total_pairs * 100) if total_pairs else 0
+        avg_sim = result["similarity_%"].mean() if len(result) else 0
 
-        st.success("Files successfully loaded!")
-        if st.button("🔍 Compare"):
-            with st.spinner("Computing similarities …"):
-                result_df = compute_similarity(df1, df2, threshold)
+        col1.metric("🎯 Total Stories Compared", f"{total_pairs:,}")
+        col2.metric("✅ # Matches", f"{len(result):,}", f"{match_ratio:.1f}% of pairs")
+        col3.metric("📈 Avg Similarity", f"{avg_sim:.1f}%")
 
-            if result_df.empty:
-                st.info("No pairs met the threshold.")
-            else:
-                st.subheader(f"Matches (≥ {threshold})")
-                st.dataframe(result_df)
+        # ---------------- Result table -------------
+        if len(result):
+            st.dataframe(
+                result.sort_values("similarity_%", ascending=False)
+                       .style.bar("similarity_%", vmax=100, color="#5fba7d")
+                       .format({"similarity_%": "{:.1f} %"}),
+                height=400,
+            )
+        else:
+            st.info("No matches above the selected threshold.")
 
     except Exception as e:
-        st.error(f"❌ Error reading files: {e}")
-else:
-    st.info("Please upload two files to begin.")
+        st.error(f"❌ {e}")
+
+st.caption("Made with ❤️ & Streamlit")
+
