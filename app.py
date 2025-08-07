@@ -117,3 +117,4 @@ if st.button("🔍 Compare"):
             st.error(f"❌ Unexpected error: {e}")
 
 st.caption("Made with ❤️ & Streamlit")
+
