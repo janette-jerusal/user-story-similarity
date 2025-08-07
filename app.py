@@ -20,23 +20,27 @@ def load_file(f):
         if f.name.endswith(".csv"):
             return pd.read_csv(f)
         elif f.name.endswith((".xlsx", ".xls")):
-            return pd.read_excel(io.BytesIO(f.read()))
+            return pd.read_excel(io.BytesIO(f.read()), header=1)  # ✅ Skip first row
         else:
             raise ValueError("Unsupported file type.")
     except Exception as e:
         raise ValueError(f"Failed to load file '{f.name}': {e}")
 
-# 3️⃣ Preload and let user choose column names
+# 3️⃣ Preload and show column names
 df1 = load_file(file1) if file1 else None
 df2 = load_file(file2) if file2 else None
 
 if df1 is not None:
-    st.subheader("Step 1: Select Columns for File 1")
+    st.subheader("📄 Preview of File 1")
+    st.dataframe(df1.head())
+    st.write("📋 File 1 Columns Detected:", df1.columns.tolist())
     col_id_1 = st.selectbox("Select ID column for file 1", df1.columns, key="id1")
     col_desc_1 = st.selectbox("Select description column for file 1", df1.columns, key="desc1")
 
 if df2 is not None:
-    st.subheader("Step 2: Select Columns for File 2")
+    st.subheader("📄 Preview of File 2")
+    st.dataframe(df2.head())
+    st.write("📋 File 2 Columns Detected:", df2.columns.tolist())
     col_id_2 = st.selectbox("Select ID column for file 2", df2.columns, key="id2")
     col_desc_2 = st.selectbox("Select description column for file 2", df2.columns, key="desc2")
 elif df1 is not None:
@@ -48,7 +52,7 @@ elif df1 is not None:
 def compute_similarity(df1, df2, col_id_1, col_desc_1, col_id_2, col_desc_2, thr):
     df1 = df1[[col_id_1, col_desc_1]].rename(columns={col_id_1: "id", col_desc_1: "desc"})
     df2 = df2[[col_id_2, col_desc_2]].rename(columns={col_id_2: "id", col_desc_2: "desc"})
-    
+
     df1["desc"] = df1["desc"].fillna("").astype(str)
     df2["desc"] = df2["desc"].fillna("").astype(str)
 
@@ -100,3 +104,4 @@ if st.button("🔍 Compare") and df1 is not None and col_id_1 and col_desc_1:
         st.error(f"❌ Unexpected error: {e}")
 
 st.caption("Made with ❤️ & Streamlit")
+
