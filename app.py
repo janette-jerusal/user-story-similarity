@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import io
 
 st.set_page_config(page_title="User‑Story Similarity Comparator", layout="wide")
 st.title("📊 User‑Story Similarity Comparator")
@@ -19,10 +20,12 @@ def load_file(f):
     try:
         if f.name.endswith(".csv"):
             return pd.read_csv(f)
-        return pd.read_excel(f)
+        elif f.name.endswith((".xlsx", ".xls")):
+            return pd.read_excel(io.BytesIO(f.read()))
+        else:
+            raise ValueError("Unsupported file type.")
     except Exception as e:
-        st.error(f"Error loading {f.name}: {e}")
-        return None
+        raise ValueError(f"Failed to load file '{f.name}': {e}")
 
 # ----------------------------------------------------------
 # 2️⃣ Comparison logic
@@ -69,18 +72,19 @@ if st.button("🔍 Compare"):
             if file2:
                 df2 = load_file(file2)
             else:
-                # Reload file1 from raw bytes to prevent Streamlit read issue
-                file1_bytes = file1.read()
-                file1.seek(0)  # Reset pointer so Streamlit can re-read it
+                # Reload file1 from raw bytes (duplicate for self-comparison)
+                file1.seek(0)
+                file_bytes = io.BytesIO(file1.read())
                 if file1.name.endswith(".csv"):
-                    df2 = pd.read_csv(pd.io.common.BytesIO(file1_bytes))
+                    df2 = pd.read_csv(file_bytes)
                 else:
-                    df2 = pd.read_excel(pd.io.common.BytesIO(file1_bytes))
+                    df2 = pd.read_excel(file_bytes)
 
             result = compute_similarity(df1, df2, threshold)
 
             st.success(f"Comparison finished. {len(result)} matching pairs found ✅")
 
+            # KPI panel
             col1, col2, col3 = st.columns(3)
             total_pairs = len(df1) * len(df2)
             match_ratio = (len(result) / total_pairs * 100) if total_pairs else 0
@@ -106,4 +110,3 @@ if st.button("🔍 Compare"):
             st.error(f"❌ Unexpected error: {e}")
 
 st.caption("Made with ❤️ & Streamlit")
-
