@@ -7,7 +7,7 @@ st.set_page_config(page_title="User‑Story Similarity Comparator", layout="wide
 st.title("📊 User‑Story Similarity Comparator")
 
 # ----------------------------------------------------------
-# 1️⃣  Upload widgets
+# 1️⃣ Upload widgets
 # ----------------------------------------------------------
 file1 = st.file_uploader("Upload file 1 (CSV / Excel)", key="f1")
 file2 = st.file_uploader("Upload file 2 (CSV / Excel, optional)", key="f2")
@@ -16,18 +16,24 @@ threshold = st.slider("Similarity threshold (%)", 0, 100, 60, 1)
 def load_file(f):
     if f is None:
         return None
-    if f.name.endswith(".csv"):
-        return pd.read_csv(f)
-    return pd.read_excel(f)
+    try:
+        if f.name.endswith(".csv"):
+            return pd.read_csv(f)
+        return pd.read_excel(f)
+    except Exception as e:
+        st.error(f"Error loading {f.name}: {e}")
+        return None
 
 # ----------------------------------------------------------
-# 2️⃣  Main comparison logic
+# 2️⃣ Comparison logic
 # ----------------------------------------------------------
 def compute_similarity(df1: pd.DataFrame, df2: pd.DataFrame, thr: float):
     df1 = df1.rename(columns=str.lower)
     df2 = df2.rename(columns=str.lower)
 
     for df in (df1, df2):
+        if df is None:
+            raise ValueError("One of the files could not be read.")
         if {"id", "desc"} - set(df.columns):
             raise ValueError("Each file must include both 'id' and 'desc' columns.")
         df["desc"] = df["desc"].fillna("").astype(str)
@@ -52,7 +58,7 @@ def compute_similarity(df1: pd.DataFrame, df2: pd.DataFrame, thr: float):
     return pd.DataFrame(matches)
 
 # ----------------------------------------------------------
-# 3️⃣  Button & results
+# 3️⃣ Button & results
 # ----------------------------------------------------------
 if st.button("🔍 Compare"):
     if not file1:
@@ -60,13 +66,21 @@ if st.button("🔍 Compare"):
     else:
         try:
             df1 = load_file(file1)
-            df2 = load_file(file2) if file2 else df1.copy(deep=True)
+            if file2:
+                df2 = load_file(file2)
+            else:
+                # Reload file1 from raw bytes to prevent Streamlit read issue
+                file1_bytes = file1.read()
+                file1.seek(0)  # Reset pointer so Streamlit can re-read it
+                if file1.name.endswith(".csv"):
+                    df2 = pd.read_csv(pd.io.common.BytesIO(file1_bytes))
+                else:
+                    df2 = pd.read_excel(pd.io.common.BytesIO(file1_bytes))
 
             result = compute_similarity(df1, df2, threshold)
 
             st.success(f"Comparison finished. {len(result)} matching pairs found ✅")
 
-            # KPI panel
             col1, col2, col3 = st.columns(3)
             total_pairs = len(df1) * len(df2)
             match_ratio = (len(result) / total_pairs * 100) if total_pairs else 0
@@ -85,11 +99,11 @@ if st.button("🔍 Compare"):
                 )
             else:
                 st.info("No matches above the selected threshold.")
+
         except ValueError as ve:
-            st.error(f"❌ Column Error: {ve}")
+            st.error(f"❌ {ve}")
         except Exception as e:
             st.error(f"❌ Unexpected error: {e}")
 
 st.caption("Made with ❤️ & Streamlit")
-
 
