@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
 
 st.set_page_config(page_title="User‑Story Similarity Comparator", layout="wide")
 st.title("📊 User‑Story Similarity Comparator")
@@ -27,10 +26,10 @@ def load_file(f):
 def compute_similarity(df1: pd.DataFrame, df2: pd.DataFrame, thr: float):
     df1 = df1.rename(columns=str.lower)
     df2 = df2.rename(columns=str.lower)
-    
+
     for df in (df1, df2):
         if {"id", "desc"} - set(df.columns):
-            raise ValueError("Each file needs 'id' and 'desc' columns.")
+            raise ValueError("Each file must include both 'id' and 'desc' columns.")
         df["desc"] = df["desc"].fillna("").astype(str)
 
     combined = pd.concat([df1["desc"], df2["desc"]]).values
@@ -56,17 +55,18 @@ def compute_similarity(df1: pd.DataFrame, df2: pd.DataFrame, thr: float):
 # 3️⃣  Button & results
 # ----------------------------------------------------------
 if st.button("🔍 Compare"):
-    try:
-        if file1 is None and file2 is None:
-            st.warning("Please upload at least one file.")
-        else:
+    if not file1:
+        st.warning("Please upload at least one file.")
+    else:
+        try:
             df1 = load_file(file1)
-            df2 = load_file(file2) if file2 is not None else df1.copy()
+            df2 = load_file(file2) if file2 else df1.copy(deep=True)
 
             result = compute_similarity(df1, df2, threshold)
+
             st.success(f"Comparison finished. {len(result)} matching pairs found ✅")
 
-            # ---------------- KPI panel ----------------
+            # KPI panel
             col1, col2, col3 = st.columns(3)
             total_pairs = len(df1) * len(df2)
             match_ratio = (len(result) / total_pairs * 100) if total_pairs else 0
@@ -76,19 +76,20 @@ if st.button("🔍 Compare"):
             col2.metric("✅ # Matches", f"{len(result):,}", f"{match_ratio:.1f}% of pairs")
             col3.metric("📈 Avg Similarity", f"{avg_sim:.1f}%")
 
-            # ---------------- Result table -------------
             if len(result):
                 st.dataframe(
                     result.sort_values("similarity_%", ascending=False)
-                           .style.bar("similarity_%", vmax=100, color="#5fba7d")
-                           .format({"similarity_%": "{:.1f} %"}),
+                          .style.bar("similarity_%", vmax=100, color="#5fba7d")
+                          .format({"similarity_%": "{:.1f} %"}),
                     height=400,
                 )
             else:
                 st.info("No matches above the selected threshold.")
+        except ValueError as ve:
+            st.error(f"❌ Column Error: {ve}")
+        except Exception as e:
+            st.error(f"❌ Unexpected error: {e}")
 
-    except Exception as e:
-        st.error(f"❌ {e}")
+st.caption("Made with ❤️ & Streamlit")
 
-st.caption("Made with ❤️ & Streamlit")
 
