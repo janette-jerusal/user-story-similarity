@@ -14,6 +14,13 @@ file1 = st.file_uploader("Upload file 1 (CSV / Excel)", key="f1")
 file2 = st.file_uploader("Upload file 2 (CSV / Excel, optional)", key="f2")
 threshold = st.slider("Similarity threshold (%)", 0, 100, 60, 1)
 
+# ----------------------------------------------------------
+# 2️⃣ Helpers
+# ----------------------------------------------------------
+def normalize_columns(df):
+    df.columns = [col.strip().lower() for col in df.columns]
+    return df
+
 def load_file(f):
     if f is None:
         return None
@@ -28,17 +35,17 @@ def load_file(f):
         raise ValueError(f"Failed to load file '{f.name}': {e}")
 
 # ----------------------------------------------------------
-# 2️⃣ Comparison logic
+# 3️⃣ Main similarity logic
 # ----------------------------------------------------------
 def compute_similarity(df1: pd.DataFrame, df2: pd.DataFrame, thr: float):
-    df1 = df1.rename(columns=str.lower)
-    df2 = df2.rename(columns=str.lower)
+    df1 = normalize_columns(df1)
+    df2 = normalize_columns(df2)
 
     for df in (df1, df2):
         if df is None:
             raise ValueError("One of the files could not be read.")
         if {"id", "desc"} - set(df.columns):
-            raise ValueError("Each file must include both 'id' and 'desc' columns.")
+            raise ValueError("Each file must contain both 'id' and 'desc' columns.")
         df["desc"] = df["desc"].fillna("").astype(str)
 
     combined = pd.concat([df1["desc"], df2["desc"]]).values
@@ -61,7 +68,7 @@ def compute_similarity(df1: pd.DataFrame, df2: pd.DataFrame, thr: float):
     return pd.DataFrame(matches)
 
 # ----------------------------------------------------------
-# 3️⃣ Button & results
+# 4️⃣ Compare button
 # ----------------------------------------------------------
 if st.button("🔍 Compare"):
     if not file1:
@@ -72,7 +79,7 @@ if st.button("🔍 Compare"):
             if file2:
                 df2 = load_file(file2)
             else:
-                # Reload file1 from raw bytes (duplicate for self-comparison)
+                # Reload file1 from bytes for second comparison
                 file1.seek(0)
                 file_bytes = io.BytesIO(file1.read())
                 if file1.name.endswith(".csv"):
