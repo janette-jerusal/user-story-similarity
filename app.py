@@ -5,7 +5,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import io
 
 st.set_page_config(page_title="User‑Story Similarity Comparator", layout="wide")
-st.title("📊 User‑Story Similarity Comparator")
+st.title(" USCAP")
 
 # ----------------------------------------------------------
 # 1️⃣ Upload widgets
@@ -63,7 +63,7 @@ def compute_similarity(df1: pd.DataFrame, df2: pd.DataFrame, thr: float):
 # ----------------------------------------------------------
 # 3️⃣ Button & results
 # ----------------------------------------------------------
-if st.button("🔍 Compare"):
+if st.button(" Compare"):
     if not file1:
         st.warning("Please upload at least one file.")
     else:
@@ -82,7 +82,7 @@ if st.button("🔍 Compare"):
 
             result = compute_similarity(df1, df2, threshold)
 
-            st.success(f"Comparison finished. {len(result)} matching pairs found ✅")
+            st.success(f"Comparison finished. {len(result)} matching pairs found ")
 
             # KPI panel
             col1, col2, col3 = st.columns(3)
@@ -90,9 +90,9 @@ if st.button("🔍 Compare"):
             match_ratio = (len(result) / total_pairs * 100) if total_pairs else 0
             avg_sim = result["similarity_%"].mean() if len(result) else 0
 
-            col1.metric("🎯 Total Stories Compared", f"{total_pairs:,}")
-            col2.metric("✅ # Matches", f"{len(result):,}", f"{match_ratio:.1f}% of pairs")
-            col3.metric("📈 Avg Similarity", f"{avg_sim:.1f}%")
+            col1.metric(" Total Stories Compared", f"{total_pairs:,}")
+            col2.metric(" # Matches", f"{len(result):,}", f"{match_ratio:.1f}% of pairs")
+            col3.metric(" Avg Similarity", f"{avg_sim:.1f}%")
 
             if len(result):
                 st.dataframe(
@@ -109,5 +109,5 @@ if st.button("🔍 Compare"):
         except Exception as e:
             st.error(f"❌ Unexpected error: {e}")
 
-st.caption("Made with ❤️ & Streamlit")
+st.caption("Janette Jerusal")
 
