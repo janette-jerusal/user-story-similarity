@@ -6,6 +6,7 @@ import io
 
 st.set_page_config(page_title="User‑Story Similarity Comparator", layout="wide")
 st.title(" USCAP")
+st.subheader("User Story Comparison Analysis Program")
 
 # ----------------------------------------------------------
 # 1️⃣ Upload widgets
