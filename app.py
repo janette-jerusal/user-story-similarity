@@ -13,7 +13,7 @@ st.subheader("User Story Comparison Analysis Program")
 # ----------------------------------------------------------
 file1 = st.file_uploader("Upload file 1 (CSV / Excel)", key="f1")
 file2 = st.file_uploader("Upload file 2 (CSV / Excel, optional)", key="f2")
-threshold = st.slider("Similarity threshold (%)", 0, 100, 60, 1)
+threshold = st.slider("Set similarity threshold (%)", 0, 100, 60, 1)
 
 def load_file(f):
     if f is None:
@@ -110,5 +110,5 @@ if st.button(" Compare"):
         except Exception as e:
             st.error(f"❌ Unexpected error: {e}")
 
-st.caption("Janette Jerusal")
+st.caption("RTX O2C")
 
