@@ -70,7 +70,7 @@ def downloadable_excel(df_pairs: pd.DataFrame, sheet_name="pairs") -> bytes:
 # UI
 # -------------------------
 st.set_page_config(page_title="User Story Similarity", layout="wide")
-st.title(" User Story Comparer Analysis Tool")
+st.title("🔎 User Story Similarity (TF-IDF · Cosine)")
 st.caption(f"Build: {datetime.utcnow():%Y-%m-%d %H:%M:%S} UTC • One-to-one pairs only")
 
 mode = st.radio(
@@ -272,14 +272,14 @@ else:
                 c1, c2 = st.columns(2)
                 with c1:
                     st.download_button(
-                        "⬇ Download CSV",
+                        "⬇️ Download CSV",
                         data=pairs.to_csv(index=False).encode("utf-8"),
                         file_name="similarity_pairs_A_vs_B.csv",
                         mime="text/csv"
                     )
                 with c2:
                     st.download_button(
-                        "⬇ Download Excel",
+                        "⬇️ Download Excel",
                         data=downloadable_excel(pairs, sheet_name="pairs_A_vs_B"),
                         file_name="similarity_pairs_A_vs_B.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -294,4 +294,6 @@ with st.expander("Need help? (FAQ)"):
         "- **Similarity score:** Cosine similarity ∈ [0, 1]; higher means more similar.\n"
         "- **Threshold:** Hide pairs below a chosen similarity to focus on strong matches.\n"
         "- **Top-K per ID_A:** Keep only the K best matches for each source story.\n"
-        "- **n-grams:** Include phrases (e.g., 2-gra
+        "- **n-grams:** Include phrases (e.g., 2-grams like 'user login'). Leaving defaults is fine."
+    )
+
