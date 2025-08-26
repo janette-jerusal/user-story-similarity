@@ -6,6 +6,12 @@
 # Run: streamlit run app.py
 
 import io
+import os
+import sys
+import platform
+import pathlib
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -23,7 +29,7 @@ def read_table(file) -> pd.DataFrame:
     elif name.endswith(".csv"):
         return pd.read_csv(file)
     else:
-        # Try excel first then csv as fallback
+        # Try excel first, then csv as fallback
         try:
             return pd.read_excel(file)
         except Exception:
@@ -51,7 +57,7 @@ def build_vectorizer(ngram_min=1, ngram_max=2, min_df=1, max_df=1.0):
     )
 
 
-def upper_triangle_long(sim_matrix: np.ndarray, ids: pd.Series | list) -> pd.DataFrame:
+def upper_triangle_long(sim_matrix: np.ndarray, ids) -> pd.DataFrame:
     """Return long-form pairs from ONLY the upper triangle (no diagonal)."""
     sim_df = pd.DataFrame(sim_matrix, index=ids, columns=ids)
     upper_only = sim_df.where(np.triu(np.ones(sim_df.shape, dtype=bool), k=1))
@@ -90,6 +96,15 @@ def downloadable_excel(df_pairs: pd.DataFrame, sheet_name="pairs_once") -> bytes
 st.set_page_config(page_title="User Story Similarity", layout="wide")
 st.title("🔎 User Story Similarity (TF-IDF • Cosine)")
 
+# Build stamp + quick diagnostics (helps confirm you’re on this build)
+st.caption(f"Build stamp: {datetime.utcnow():%Y-%m-%d %H:%M:%S} UTC • one/two-file modes ✅")
+with st.expander("🛠 Debug (where is this app running?)", expanded=False):
+    st.write("**Python**", sys.version)
+    st.write("**Platform**", platform.platform())
+    st.write("**CWD**", os.getcwd())
+    st.write("**__file__**", __file__ if '__file__' in globals() else "(not set)")
+    st.write("**Repo hint**", str(pathlib.Path('.').resolve()))
+
 mode = st.radio("Comparison Mode", ["One file (all-vs-all)", "Two files (A vs B)"], horizontal=True)
 
 with st.expander("Vectorizer Settings (optional)"):
@@ -110,7 +125,10 @@ with st.sidebar:
     show_preview_rows = st.number_input("Preview rows", min_value=10, max_value=200, value=50, step=10)
 
 if mode == "One file (all-vs-all)":
-    file1 = st.file_uploader("Upload a file (Excel or CSV) with ID and Description columns", type=["xlsx", "xls", "csv"])
+    file1 = st.file_uploader(
+        "Upload a file (Excel or CSV) with ID and Description columns",
+        type=["xlsx", "xls", "csv"]
+    )
     if file1 is not None:
         df = read_table(file1)
         st.write("**Data preview:**")
@@ -156,10 +174,20 @@ if mode == "One file (all-vs-all)":
             cdl1, cdl2 = st.columns(2)
             with cdl1:
                 csv_bytes = pairs.to_csv(index=False).encode("utf-8")
-                st.download_button("⬇️ Download CSV", data=csv_bytes, file_name="similarity_pairs_once.csv", mime="text/csv")
+                st.download_button(
+                    "⬇️ Download CSV",
+                    data=csv_bytes,
+                    file_name="similarity_pairs_once.csv",
+                    mime="text/csv"
+                )
             with cdl2:
                 xlsx_bytes = downloadable_excel(pairs)
-                st.download_button("⬇️ Download Excel", data=xlsx_bytes, file_name="similarity_pairs_once.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                st.download_button(
+                    "⬇️ Download Excel",
+                    data=xlsx_bytes,
+                    file_name="similarity_pairs_once.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
 else:
     fileA = st.file_uploader("Upload File A (Excel or CSV)", type=["xlsx", "xls", "csv"], key="A")
@@ -225,9 +253,17 @@ else:
             cdl1, cdl2 = st.columns(2)
             with cdl1:
                 csv_bytes = pairs.to_csv(index=False).encode("utf-8")
-                st.download_button("⬇️ Download CSV", data=csv_bytes, file_name="similarity_pairs_A_vs_B.csv", mime="text/csv")
+                st.download_button(
+                    "⬇️ Download CSV",
+                    data=csv_bytes,
+                    file_name="similarity_pairs_A_vs_B.csv",
+                    mime="text/csv"
+                )
             with cdl2:
                 xlsx_bytes = downloadable_excel(pairs, sheet_name="pairs_A_vs_B")
-                st.download_button("⬇️ Download Excel", data=xlsx_bytes, file_name="similarity_pairs_A_vs_B.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-
+                st.download_button(
+                    "⬇️ Download Excel",
+                    data=xlsx_bytes,
+                    file_name="similarity_pairs_A_vs_B.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
