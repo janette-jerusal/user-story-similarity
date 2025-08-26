@@ -109,5 +109,3 @@ if st.button(" Compare"):
             st.error(f"❌ {ve}")
         except Exception as e:
             st.error(f"❌ Unexpected error: {e}")
-
-st.caption("RTX O2C")
