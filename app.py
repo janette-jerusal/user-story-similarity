@@ -230,3 +230,4 @@ else:
                 xlsx_bytes = downloadable_excel(pairs, sheet_name="pairs_A_vs_B")
                 st.download_button("⬇️ Download Excel", data=xlsx_bytes, file_name="similarity_pairs_A_vs_B.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
+
