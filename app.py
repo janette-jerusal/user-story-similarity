@@ -70,7 +70,8 @@ def downloadable_excel(df_pairs: pd.DataFrame, sheet_name="pairs") -> bytes:
 # UI
 # -------------------------
 st.set_page_config(page_title="User Story Similarity", layout="wide")
-st.title("🔎 User Story Similarity (TF-IDF · Cosine)")
+st.title("USCAT")
+st.caption("User Story Comparison Analysis Tool")
 st.caption(f"Build: {datetime.utcnow():%Y-%m-%d %H:%M:%S} UTC • One-to-one pairs only")
 
 mode = st.radio(
