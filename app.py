@@ -16,7 +16,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 # -------------------------
 # Page config & Styling
 # -------------------------
-st.set_page_config(page_title="User Story Similarity", page_icon="🔎", layout="wide")
+st.set_page_config(page_title="User Story Similarity", layout="wide")
 
 # Raytheon palette CSS — sleek, high-tech look
 st.markdown("""
