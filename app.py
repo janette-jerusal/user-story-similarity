@@ -1,5 +1,5 @@
 # app.py
-# User Story Similarity — simple, friendly UI
+# User Story Similarity — simple, friendly UI (robust to non-string column names)
 # - One-file mode: compares each pair ONCE (upper triangle, no self-pairs)
 # - Two-file mode: A vs B once (rectangular)
 # - Outputs: ID_A, Desc_A, ID_B, Desc_B, similarity
@@ -31,11 +31,14 @@ def read_table(file) -> pd.DataFrame:
             return pd.read_csv(file)
 
 def guess_columns(df: pd.DataFrame):
-    cols = list(df.columns)
-    id_candidates = [c for c in cols if c.strip().lower() in ["id","story id","user story id","issue id","key"]]
-    desc_candidates = [c for c in cols if c.strip().lower() in ["description","user story","story","summary","title"]]
+    # ensure all column names are strings and trimmed
+    cols = [str(c).strip() for c in df.columns]
+
+    id_candidates = [c for c in cols if c.lower() in ["id","story id","user story id","issue id","key"]]
+    desc_candidates = [c for c in cols if c.lower() in ["description","user story","story","summary","title"]]
+
     id_col = id_candidates[0] if id_candidates else cols[0]
-    desc_col = desc_candidates[0] if desc_candidates else cols[min(1, len(cols)-1)]
+    desc_col = desc_candidates[0] if desc_candidates else (cols[1] if len(cols) > 1 else cols[0])
     return id_col, desc_col
 
 def build_vectorizer(ngram_min=1, ngram_max=2, min_df=1, max_df=1.0):
@@ -77,7 +80,7 @@ mode = st.radio(
     "Comparison mode",
     ["One file (all vs all, once each)", "Two files (A vs B)"],
     horizontal=True,
-    help="Choose whether to compare stories within a single file (every pair once) or compare stories from File A against File B."
+    help="Compare stories within a single file (every pair once) or compare stories from File A against File B."
 )
 
 st.info(
@@ -131,6 +134,9 @@ if mode.startswith("One file"):
 
     if file1 is not None:
         df = read_table(file1)
+        # normalize column names to strings
+        df.columns = [str(c).strip() for c in df.columns]
+
         st.write("**Data preview**")
         st.dataframe(df.head(10), use_container_width=True)
 
@@ -207,6 +213,9 @@ else:
     if fileA is not None and fileB is not None:
         dfA = read_table(fileA)
         dfB = read_table(fileB)
+        # normalize column names to strings
+        dfA.columns = [str(c).strip() for c in dfA.columns]
+        dfB.columns = [str(c).strip() for c in dfB.columns]
 
         st.write("**Preview A**"); st.dataframe(dfA.head(8), use_container_width=True)
         st.write("**Preview B**"); st.dataframe(dfB.head(8), use_container_width=True)
