@@ -1,5 +1,5 @@
 # app.py
-# User Story Similarity
+# User Story Similarity — Raytheon-styled, sleek & professional
 # - One-file mode: compares each pair ONCE (upper triangle, no self-pairs)
 # - Two-file mode: A vs B only (rectangular)
 # - Outputs: ID_A, Desc_A, ID_B, Desc_B, similarity
@@ -431,4 +431,3 @@ with st.expander("Need help? (FAQ)"):
         "- **Top-K per ID_A:** Keep only the K best matches per source story.\n"
         "- **n-grams:** Include short phrases (e.g., 2-grams like “reset password”). Defaults are fine."
     )
-
