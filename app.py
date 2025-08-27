@@ -154,8 +154,7 @@ def downloadable_excel(df_pairs: pd.DataFrame, sheet_name="pairs") -> bytes:
 st.markdown(
     """
     <div class="app-header">
-        <h1>🔎 User Story Similarity</h1>
-        <div class="app-header-sub">Raytheon-styled • TF-IDF • Cosine similarity • One-to-one pairs</div>
+        <h1> User Story Comparison Analysis Tool (USCAT)</h1>
     </div>
     """,
     unsafe_allow_html=True
