@@ -1,5 +1,5 @@
 # app.py
-# User Story Similarity — Raytheon-styled, sleek & professional
+# User Story Similarity 
 # - One-file mode: compares each pair ONCE (upper triangle, no self-pairs)
 # - Two-file mode: A vs B only (rectangular)
 # - Outputs: ID_A, Desc_A, ID_B, Desc_B, similarity
@@ -286,7 +286,7 @@ else:
         dfA[descA] = dfA[descA].fillna("").astype(str)
         dfB[descB] = dfB[descB].fillna("").astype(str)
 
-        if st.button("▶️ Compute similarities (A vs B)"):
+        if st.button("▶ Compute similarities (A vs B)"):
             vec = build_vectorizer(ngram_min, ngram_max, min_df, max_df)
             combined = pd.concat([dfA[descA], dfB[descB]], ignore_index=True)
             vec.fit(combined.tolist())
@@ -314,7 +314,7 @@ else:
 
             c1, c2 = st.columns(2)
             with c1:
-                st.download_button("⬇️ Download CSV",
+                st.download_button("⬇ Download CSV",
                                    data=pairs.to_csv(index=False).encode("utf-8"),
                                    file_name="similarity_pairs_A_vs_B.csv",
                                    mime="text/csv")
