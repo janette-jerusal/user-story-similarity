@@ -1,5 +1,5 @@
 # app.py
-# User Story Similarity — simple, friendly UI (robust to non-string column names)
+# User Story Similarity — simple, friendly UI (robust + safe Excel export)
 # - One-file mode: compares each pair ONCE (upper triangle, no self-pairs)
 # - Two-file mode: A vs B once (rectangular)
 # - Outputs: ID_A, Desc_A, ID_B, Desc_B, similarity
@@ -13,8 +13,9 @@ import streamlit as st
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+
 # -------------------------
-# Small helpers
+# Helpers
 # -------------------------
 def read_table(file) -> pd.DataFrame:
     name = file.name.lower()
@@ -30,44 +31,73 @@ def read_table(file) -> pd.DataFrame:
             file.seek(0)
             return pd.read_csv(file)
 
+
 def guess_columns(df: pd.DataFrame):
     # ensure all column names are strings and trimmed
     cols = [str(c).strip() for c in df.columns]
 
-    id_candidates = [c for c in cols if c.lower() in ["id","story id","user story id","issue id","key"]]
-    desc_candidates = [c for c in cols if c.lower() in ["description","user story","story","summary","title"]]
+    id_candidates = [c for c in cols if c.lower() in ["id", "story id", "user story id", "issue id", "key"]]
+    desc_candidates = [c for c in cols if c.lower() in ["description", "user story", "story", "summary", "title"]]
 
     id_col = id_candidates[0] if id_candidates else cols[0]
     desc_col = desc_candidates[0] if desc_candidates else (cols[1] if len(cols) > 1 else cols[0])
     return id_col, desc_col
+
 
 def build_vectorizer(ngram_min=1, ngram_max=2, min_df=1, max_df=1.0):
     return TfidfVectorizer(
         stop_words="english",
         ngram_range=(ngram_min, ngram_max),
         min_df=min_df,
-        max_df=max_df
+        max_df=max_df,
     )
+
 
 def upper_triangle_long(sim_matrix: np.ndarray, ids) -> pd.DataFrame:
     sim_df = pd.DataFrame(sim_matrix, index=ids, columns=ids)
     upper_only = sim_df.where(np.triu(np.ones(sim_df.shape, dtype=bool), k=1))
-    out = (upper_only.stack().reset_index()
-           .rename(columns={"level_0":"ID_A","level_1":"ID_B",0:"similarity"}))
+    out = (
+        upper_only.stack()
+        .reset_index()
+        .rename(columns={"level_0": "ID_A", "level_1": "ID_B", 0: "similarity"})
+    )
     return out
+
 
 def cross_long(sim_matrix: np.ndarray, ids_a, ids_b) -> pd.DataFrame:
     sim_df = pd.DataFrame(sim_matrix, index=ids_a, columns=ids_b)
-    out = (sim_df.stack().reset_index()
-           .rename(columns={"level_0":"ID_A","level_1":"ID_B",0:"similarity"}))
+    out = (
+        sim_df.stack()
+        .reset_index()
+        .rename(columns={"level_0": "ID_A", "level_1": "ID_B", 0: "similarity"})
+    )
     return out
 
-def downloadable_excel(df_pairs: pd.DataFrame, sheet_name="pairs") -> bytes:
+
+def downloadable_excel(df_pairs: pd.DataFrame, sheet_name: str = "pairs") -> bytes | None:
+    """
+    Return XLSX bytes if an Excel writer engine is available.
+    Prefers xlsxwriter; falls back to openpyxl; returns None if neither is installed.
+    """
     buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
+    engine = None
+    try:
+        import xlsxwriter  # noqa: F401
+
+        engine = "xlsxwriter"
+    except Exception:
+        try:
+            import openpyxl  # noqa: F401
+
+            engine = "openpyxl"
+        except Exception:
+            return None  # no engine installed; caller should handle gracefully
+
+    with pd.ExcelWriter(buf, engine=engine) as w:
         df_pairs.to_excel(w, index=False, sheet_name=sheet_name)
     buf.seek(0)
     return buf.read()
+
 
 # -------------------------
 # UI
@@ -80,7 +110,7 @@ mode = st.radio(
     "Comparison mode",
     ["One file (all vs all, once each)", "Two files (A vs B)"],
     horizontal=True,
-    help="Compare stories within a single file (every pair once) or compare stories from File A against File B."
+    help="Compare stories within a single file (every pair once) or compare stories from File A against File B.",
 )
 
 st.info(
@@ -93,34 +123,69 @@ with st.sidebar:
     st.header("Filters")
     threshold = st.slider(
         "Similarity threshold",
-        0.0, 1.0, 0.30, 0.01,
-        help="Hide pairs below this cosine similarity. Start around 0.30–0.50; increase to see only closer matches."
+        0.0,
+        1.0,
+        0.30,
+        0.01,
+        help="Hide pairs below this cosine similarity. Start around 0.30–0.50; increase to see only closer matches.",
     )
     topk_per_A = st.number_input(
         "Top-K per ID_A (0 = no limit)",
-        min_value=0, value=0, step=1,
-        help="Limit how many best matches you keep for each source story (ID_A). Set 0 to keep all that pass the threshold."
+        min_value=0,
+        value=0,
+        step=1,
+        help="Limit how many best matches you keep for each source story (ID_A). Set 0 to keep all that pass the threshold.",
     )
     sort_desc = st.checkbox(
         "Sort by similarity (desc)",
         value=True,
-        help="When enabled, results are sorted from most similar to least."
+        help="When enabled, results are sorted from most similar to least.",
     )
     show_preview_rows = st.number_input(
         "Preview rows",
-        min_value=10, max_value=200, value=50, step=10,
-        help="How many rows to preview in the on-screen table (download contains all)."
+        min_value=10,
+        max_value=200,
+        value=50,
+        step=10,
+        help="How many rows to preview in the on-screen table (download contains all).",
     )
 
 with st.expander("Advanced settings (optional)", expanded=False):
     c1, c2, c3 = st.columns(3)
     with c1:
-        ngram_min = st.number_input("Min n-gram", 1, 3, 1, 1, help="Smallest token span for TF-IDF (1 = unigrams).")
-        ngram_max = st.number_input("Max n-gram", 1, 3, 2, 1, help="Largest token span for TF-IDF (2 = capture short phrases).")
+        ngram_min = st.number_input(
+            "Min n-gram",
+            1,
+            3,
+            1,
+            1,
+            help="Smallest token span for TF-IDF (1 = unigrams).",
+        )
+        ngram_max = st.number_input(
+            "Max n-gram",
+            1,
+            3,
+            2,
+            1,
+            help="Largest token span for TF-IDF (2 = capture short phrases).",
+        )
     with c2:
-        min_df = st.number_input("min_df", 1, value=1, step=1, help="Ignore terms that appear in fewer than this many documents.")
+        min_df = st.number_input(
+            "min_df",
+            1,
+            value=1,
+            step=1,
+            help="Ignore terms that appear in fewer than this many documents.",
+        )
     with c3:
-        max_df = st.slider("max_df", 0.1, 1.0, 1.0, 0.05, help="Ignore terms that appear in more than this fraction of documents.")
+        max_df = st.slider(
+            "max_df",
+            0.1,
+            1.0,
+            1.0,
+            0.05,
+            help="Ignore terms that appear in more than this fraction of documents.",
+        )
 
 # -------------------------
 # ONE FILE
@@ -128,8 +193,8 @@ with st.expander("Advanced settings (optional)", expanded=False):
 if mode.startswith("One file"):
     file1 = st.file_uploader(
         "Upload a file (Excel/CSV) with **ID** and **Description** columns",
-        type=["xlsx","xls","csv"],
-        help="Typical columns: ID, Description (or Story, Summary, Title)."
+        type=["xlsx", "xls", "csv"],
+        help="Typical columns: ID, Description (or Story, Summary, Title).",
     )
 
     if file1 is not None:
@@ -144,11 +209,19 @@ if mode.startswith("One file"):
         id_guess, desc_guess = guess_columns(df)
         c1, c2 = st.columns(2)
         with c1:
-            id_col = st.selectbox("ID column", df.columns, index=list(df.columns).index(id_guess),
-                                  help="Unique identifier for each story (e.g., ID, Key).")
+            id_col = st.selectbox(
+                "ID column",
+                df.columns,
+                index=list(df.columns).index(id_guess),
+                help="Unique identifier for each story (e.g., ID, Key).",
+            )
         with c2:
-            desc_col = st.selectbox("Description column", df.columns, index=list(df.columns).index(desc_guess),
-                                    help="Text describing the story; this is what gets vectorized.")
+            desc_col = st.selectbox(
+                "Description column",
+                df.columns,
+                index=list(df.columns).index(desc_guess),
+                help="Text describing the story; this is what gets vectorized.",
+            )
 
         # Clean + validate
         df = df.copy()
@@ -172,13 +245,16 @@ if mode.startswith("One file"):
                     pairs["Desc_B"] = pairs["ID_B"].map(id_to_desc)
 
                     # Reorder + filter
-                    pairs = pairs[["ID_A","Desc_A","ID_B","Desc_B","similarity"]]
+                    pairs = pairs[["ID_A", "Desc_A", "ID_B", "Desc_B", "similarity"]]
                     if threshold > 0:
                         pairs = pairs[pairs["similarity"] >= threshold]
 
                     if topk_per_A > 0:
-                        pairs = (pairs.sort_values("similarity", ascending=not sort_desc)
-                                       .groupby("ID_A", as_index=False).head(topk_per_A))
+                        pairs = (
+                            pairs.sort_values("similarity", ascending=not sort_desc)
+                            .groupby("ID_A", as_index=False)
+                            .head(topk_per_A)
+                        )
                     elif sort_desc:
                         pairs = pairs.sort_values("similarity", ascending=False)
 
@@ -191,24 +267,30 @@ if mode.startswith("One file"):
                         "⬇️ Download CSV",
                         data=pairs.to_csv(index=False).encode("utf-8"),
                         file_name="similarity_pairs_once.csv",
-                        mime="text/csv"
+                        mime="text/csv",
                     )
                 with c2:
-                    st.download_button(
-                        "⬇️ Download Excel",
-                        data=downloadable_excel(pairs, sheet_name="pairs_once"),
-                        file_name="similarity_pairs_once.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+                    xlsx_bytes = downloadable_excel(pairs, sheet_name="pairs_once")
+                    if xlsx_bytes is not None:
+                        st.download_button(
+                            "⬇️ Download Excel",
+                            data=xlsx_bytes,
+                            file_name="similarity_pairs_once.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        )
+                    else:
+                        st.caption("ℹ️ Excel export unavailable (install `xlsxwriter` or `openpyxl`). CSV works.")
 
 # -------------------------
 # TWO FILES
 # -------------------------
 else:
-    fileA = st.file_uploader("Upload File A (Excel/CSV)", type=["xlsx","xls","csv"],
-                             help="Source set A — each A story will be compared to every B story.", key="A")
-    fileB = st.file_uploader("Upload File B (Excel/CSV)", type=["xlsx","xls","csv"],
-                             help="Target set B — results list A vs B pairs once.", key="B")
+    fileA = st.file_uploader(
+        "Upload File A (Excel/CSV)", type=["xlsx", "xls", "csv"], help="Source set A — each A story will be compared to every B story.", key="A"
+    )
+    fileB = st.file_uploader(
+        "Upload File B (Excel/CSV)", type=["xlsx", "xls", "csv"], help="Target set B — results list A vs B pairs once.", key="B"
+    )
 
     if fileA is not None and fileB is not None:
         dfA = read_table(fileA)
@@ -217,27 +299,47 @@ else:
         dfA.columns = [str(c).strip() for c in dfA.columns]
         dfB.columns = [str(c).strip() for c in dfB.columns]
 
-        st.write("**Preview A**"); st.dataframe(dfA.head(8), use_container_width=True)
-        st.write("**Preview B**"); st.dataframe(dfB.head(8), use_container_width=True)
+        st.write("**Preview A**")
+        st.dataframe(dfA.head(8), use_container_width=True)
+        st.write("**Preview B**")
+        st.dataframe(dfB.head(8), use_container_width=True)
 
         idA_guess, descA_guess = guess_columns(dfA)
         idB_guess, descB_guess = guess_columns(dfB)
 
         c1, c2 = st.columns(2)
         with c1:
-            idA = st.selectbox("File A — ID column", dfA.columns, index=list(dfA.columns).index(idA_guess),
-                               help="Unique ID in File A (e.g., ID, Key).")
-            descA = st.selectbox("File A — Description column", dfA.columns, index=list(dfA.columns).index(descA_guess),
-                                 help="Text field to compare for File A.")
+            idA = st.selectbox(
+                "File A — ID column",
+                dfA.columns,
+                index=list(dfA.columns).index(idA_guess),
+                help="Unique ID in File A (e.g., ID, Key).",
+            )
+            descA = st.selectbox(
+                "File A — Description column",
+                dfA.columns,
+                index=list(dfA.columns).index(descA_guess),
+                help="Text field to compare for File A.",
+            )
         with c2:
-            idB = st.selectbox("File B — ID column", dfB.columns, index=list(dfB.columns).index(idB_guess),
-                               help="Unique ID in File B.")
-            descB = st.selectbox("File B — Description column", dfB.columns, index=list(dfB.columns).index(descB_guess),
-                                 help="Text field to compare for File B.")
+            idB = st.selectbox(
+                "File B — ID column",
+                dfB.columns,
+                index=list(dfB.columns).index(idB_guess),
+                help="Unique ID in File B.",
+            )
+            descB = st.selectbox(
+                "File B — Description column",
+                dfB.columns,
+                index=list(dfB.columns).index(descB_guess),
+                help="Text field to compare for File B.",
+            )
 
         # Clean + validate
-        dfA = dfA.copy(); dfB = dfB.copy()
-        dfA[idA] = dfA[idA].astype(str); dfB[idB] = dfB[idB].astype(str)
+        dfA = dfA.copy()
+        dfB = dfB.copy()
+        dfA[idA] = dfA[idA].astype(str)
+        dfB[idB] = dfB[idB].astype(str)
         dfA[descA] = dfA[descA].fillna("").astype(str)
         dfB[descB] = dfB[descB].fillna("").astype(str)
 
@@ -265,13 +367,16 @@ else:
                     pairs["Desc_B"] = pairs["ID_B"].map(mapB)
 
                     # Reorder + filter
-                    pairs = pairs[["ID_A","Desc_A","ID_B","Desc_B","similarity"]]
+                    pairs = pairs[["ID_A", "Desc_A", "ID_B", "Desc_B", "similarity"]]
                     if threshold > 0:
                         pairs = pairs[pairs["similarity"] >= threshold]
 
                     if topk_per_A > 0:
-                        pairs = (pairs.sort_values("similarity", ascending=not sort_desc)
-                                       .groupby("ID_A", as_index=False).head(topk_per_A))
+                        pairs = (
+                            pairs.sort_values("similarity", ascending=not sort_desc)
+                            .groupby("ID_A", as_index=False)
+                            .head(topk_per_A)
+                        )
                     elif sort_desc:
                         pairs = pairs.sort_values("similarity", ascending=False)
 
@@ -284,15 +389,19 @@ else:
                         "⬇️ Download CSV",
                         data=pairs.to_csv(index=False).encode("utf-8"),
                         file_name="similarity_pairs_A_vs_B.csv",
-                        mime="text/csv"
+                        mime="text/csv",
                     )
                 with c2:
-                    st.download_button(
-                        "⬇️ Download Excel",
-                        data=downloadable_excel(pairs, sheet_name="pairs_A_vs_B"),
-                        file_name="similarity_pairs_A_vs_B.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+                    xlsx_bytes = downloadable_excel(pairs, sheet_name="pairs_A_vs_B")
+                    if xlsx_bytes is not None:
+                        st.download_button(
+                            "⬇️ Download Excel",
+                            data=xlsx_bytes,
+                            file_name="similarity_pairs_A_vs_B.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        )
+                    else:
+                        st.caption("ℹ️ Excel export unavailable (install `xlsxwriter` or `openpyxl`). CSV works.")
 
 # -------------------------
 # Friendly footer / FAQ
