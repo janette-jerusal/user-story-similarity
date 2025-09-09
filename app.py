@@ -103,7 +103,7 @@ def downloadable_excel(df_pairs: pd.DataFrame, sheet_name: str = "pairs") -> byt
 # UI
 # -------------------------
 st.set_page_config(page_title="User Story Similarity", layout="wide")
-st.title("USCAP)")
+st.title("USCAP")
 st.caption(f"Build: {datetime.utcnow():%Y-%m-%d %H:%M:%S} UTC • One-to-one pairs only")
 
 mode = st.radio(
