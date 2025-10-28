@@ -19,6 +19,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 st.set_page_config(page_title="User Story Similarity", layout="wide")
 BUILD_TS = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 st.title("USCAP")
+st.header("User Story Comparison Analysis Program")
 st.caption(f"Build: {BUILD_TS} UTC • One-to-one pairs only")
 
 # -------------------------
