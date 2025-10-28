@@ -278,9 +278,9 @@ else:
         dfA_raw = read_table_from_bytes(fileA.name, fileA.getvalue())
         dfB_raw = read_table_from_bytes(fileB.name, fileB.getvalue())
 
-        st.write("**Preview A**")
+        st.write("**File A Preview**")
         st.dataframe(dfA_raw.head(8), use_container_width=True)
-        st.write("**Preview B**")
+        st.write("**File B Preview**")
         st.dataframe(dfB_raw.head(8), use_container_width=True)
 
         idA_guess, descA_guess = guess_columns(dfA_raw)
@@ -288,11 +288,11 @@ else:
 
         c1, c2 = st.columns(2)
         with c1:
-            idA = st.selectbox("File A — ID column", dfA_raw.columns, index=list(dfA_raw.columns).index(idA_guess), key="idA")
-            descA = st.selectbox("File A — Description column", dfA_raw.columns, index=list(dfA_raw.columns).index(descA_guess), key="descA")
+            idA = st.selectbox("File A — User Story ID Column", dfA_raw.columns, index=list(dfA_raw.columns).index(idA_guess), key="idA")
+            descA = st.selectbox("File A — User Story Description column", dfA_raw.columns, index=list(dfA_raw.columns).index(descA_guess), key="descA")
         with c2:
-            idB = st.selectbox("File B — ID column", dfB_raw.columns, index=list(dfB_raw.columns).index(idB_guess), key="idB")
-            descB = st.selectbox("File B — Description column", dfB_raw.columns, index=list(dfB_raw.columns).index(descB_guess), key="descB")
+            idB = st.selectbox("File B — User Story ID column", dfB_raw.columns, index=list(dfB_raw.columns).index(idB_guess), key="idB")
+            descB = st.selectbox("File B — User Story Description column", dfB_raw.columns, index=list(dfB_raw.columns).index(descB_guess), key="descB")
 
         dfA = _clean_df(dfA_raw, idA, descA)
         dfB = _clean_df(dfB_raw, idB, descB)
@@ -300,7 +300,7 @@ else:
         if dfA.empty or dfB.empty:
             st.warning("No usable rows after cleaning in one or both files.")
         else:
-            if st.button("Compute similarities (A vs B)", key="go2"):
+            if st.button("Compute Similarities (A vs B)", key="go2"):
                 with st.spinner("Vectorizing and computing…"):
                     vec = build_vectorizer(ngram_min, ngram_max, min_df, max_df)
                     combined = pd.concat([dfA[descA], dfB[descB]], ignore_index=True)
@@ -321,7 +321,7 @@ else:
                             pairs["Desc_A"] = pairs["ID_A"].map(mapA)
                             pairs["Desc_B"] = pairs["ID_B"].map(mapB)
 
-                            pairs = pairs[["ID_A", "Desc_A", "ID_B", "Desc_B", "similarity"]]
+                            pairs = pairs[["Story A ID", "Story A Desc", "Story BI ", "Story B Desc", "Similarity Score"]]
                             if threshold > 0:
                                 pairs = pairs[pairs["similarity"] >= threshold]
                             if topk_per_A > 0:
@@ -354,7 +354,7 @@ else:
                             c1, c2 = st.columns(2)
                             with c1:
                                 st.download_button(
-                                    "⬇️ Download CSV",
+                                    "⬇️ Download CSV results",
                                     data=pairs.to_csv(index=False).encode("utf-8"),
                                     file_name="similarity_pairs_A_vs_B.csv",
                                     mime="text/csv",
@@ -363,7 +363,7 @@ else:
                                 xlsx_bytes = downloadable_excel(pairs, sheet_name="pairs_A_vs_B", meta=meta)
                                 if xlsx_bytes:
                                     st.download_button(
-                                        "⬇️ Download Excel",
+                                        "⬇️ Download Excel results",
                                         data=xlsx_bytes,
                                         file_name="similarity_pairs_A_vs_B.xlsx",
                                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
