@@ -322,7 +322,7 @@ else:
                             pairs["Desc_A"] = pairs["ID_A"].map(mapA)
                             pairs["Desc_B"] = pairs["ID_B"].map(mapB)
 
-                            pairs = pairs[["Story A ID", "Story A Desc", "Story BI ", "Story B Desc", "Similarity Score"]]
+                            pairs = pairs[["ID_A", "Desc_A", "ID_B", "Desc_B", "similarity"]]
                             if threshold > 0:
                                 pairs = pairs[pairs["similarity"] >= threshold]
                             if topk_per_A > 0:
