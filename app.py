@@ -1,23 +1,36 @@
 # app.py
 # User Story Similarity — robust UI + safe exports
 
-import io
-from datetime import datetime
-from pathlib import Path
-from typing import Tuple, Optional
+import sys
+import traceback
 
-import numpy as np
-import pandas as pd
-import streamlit as st
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+# -------------------------
+# HARD STARTUP LOGGER (Cloud debug)
+# If anything crashes during import/startup, it will show in Streamlit Cloud logs.
+# -------------------------
+try:
+    import io
+    from datetime import datetime, UTC
+    from pathlib import Path
+    from typing import Tuple, Optional
+
+    import numpy as np
+    import pandas as pd
+    import streamlit as st
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+
+except Exception:
+    print("=== FATAL IMPORT/STARTUP ERROR ===", file=sys.stderr)
+    traceback.print_exc()
+    raise
 
 
 # -------------------------
 # Streamlit setup
 # -------------------------
 st.set_page_config(page_title="User Story Similarity", layout="wide")
-BUILD_TS = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+BUILD_TS = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 st.title("USCAP")
 st.subheader("User Story Comparison Analysis Program")
 st.caption(f"Build: {BUILD_TS} UTC • One-to-one pairs only")
@@ -193,7 +206,7 @@ if mode.startswith("One file"):
     if file1 is not None:
         df_raw = read_table_from_bytes(file1.name, file1.getvalue())
         st.write("**Data preview**")
-        st.dataframe(df_raw.head(10), use_container_width=True)
+        st.dataframe(df_raw.head(10), width="stretch")
 
         id_guess, desc_guess = guess_columns(df_raw)
         c1, c2 = st.columns(2)
@@ -233,7 +246,7 @@ if mode.startswith("One file"):
                             pairs = pairs.sort_values("similarity", ascending=False)
 
                         st.success(f"Done. {len(pairs):,} unique pairs (A→B only).")
-                        st.dataframe(pairs.head(show_preview_rows), use_container_width=True)
+                        st.dataframe(pairs.head(show_preview_rows), width="stretch")
 
                         meta = {
                             "Build UTC": BUILD_TS,
@@ -280,9 +293,9 @@ else:
         dfB_raw = read_table_from_bytes(fileB.name, fileB.getvalue())
 
         st.write("**File A Preview**")
-        st.dataframe(dfA_raw.head(8), use_container_width=True)
+        st.dataframe(dfA_raw.head(8), width="stretch")
         st.write("**File B Preview**")
-        st.dataframe(dfB_raw.head(8), use_container_width=True)
+        st.dataframe(dfB_raw.head(8), width="stretch")
 
         idA_guess, descA_guess = guess_columns(dfA_raw)
         idB_guess, descB_guess = guess_columns(dfB_raw)
@@ -335,7 +348,7 @@ else:
                                 pairs = pairs.sort_values("similarity", ascending=False)
 
                             st.success(f"Done. {len(pairs):,} A×B pairs.")
-                            st.dataframe(pairs.head(show_preview_rows), use_container_width=True)
+                            st.dataframe(pairs.head(show_preview_rows), width="stretch")
 
                             meta = {
                                 "Build UTC": BUILD_TS,
@@ -380,6 +393,7 @@ with st.expander("Need help? (FAQ)"):
         "- **What is TF-IDF?** Turns text into weighted token vectors; common words matter less.\n"
         "- **Similarity:** Cosine ∈ [0, 1]; higher = closer.\n"
         "- **Threshold:** Hide pairs below a cutoff.\n"
-        "- **Top-K per ID_A:** Keep only K best matches for each source row.\n"
+        "- **Top-K per ID_A:** Keep only K best matches for each ID_A.\n"
         "- **n-grams:** Include short phrases (e.g., 2-grams like “user login”)."
     )
+
