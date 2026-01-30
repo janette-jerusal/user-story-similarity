@@ -1,4 +1,4 @@
-# app.py — scalable Streamlit similarity (NO NxN matrices)
+# app.py — scalable Streamlit similarity (NO NxN matrices) + Topic/Status + Excel export
 import io
 import traceback
 from datetime import datetime, timezone
@@ -19,6 +19,20 @@ BUILD_TS = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 st.title("USCAP")
 st.subheader("User Story Comparison Analysis Program")
 st.caption(f"Build: {BUILD_TS} UTC • Scalable Top-K (no NxN)")
+
+# -------------------------
+# Excel export helper
+# -------------------------
+def to_excel_bytes(df: pd.DataFrame, sheet_name: str = "results") -> bytes:
+    """
+    Convert DataFrame to Excel bytes for Streamlit download.
+    Uses openpyxl (in requirements).
+    """
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name[:31])  # Excel sheet name max length = 31
+    buffer.seek(0)
+    return buffer.read()
 
 # -------------------------
 # File loading
@@ -43,19 +57,30 @@ def read_table_from_bytes(name: str, uploaded_bytes: bytes) -> pd.DataFrame:
         bio.seek(0)
         return pd.read_excel(bio)
 
-def guess_columns(df: pd.DataFrame) -> Tuple[str, str]:
+def guess_columns(df: pd.DataFrame) -> Tuple[str, str, Optional[str], Optional[str]]:
+    """
+    Returns (id_col, desc_col, topic_col_or_None, status_col_or_None)
+    """
     cols = [str(c).strip() for c in df.columns]
     norm = {c: c.lower().strip() for c in cols}
 
     id_aliases = {"id", "story id", "user story id", "issue id", "key", "ticket", "task id"}
     desc_aliases = {"description", "user story", "story", "summary", "title", "details", "acceptance criteria"}
+    topic_aliases = {"topic", "category", "area", "module", "feature", "epic"}
+    status_aliases = {"status", "state", "workflow state", "stage"}
 
     id_candidates = [c for c in cols if norm[c] in id_aliases]
     desc_candidates = [c for c in cols if norm[c] in desc_aliases]
+    topic_candidates = [c for c in cols if norm[c] in topic_aliases]
+    status_candidates = [c for c in cols if norm[c] in status_aliases]
 
     id_col = id_candidates[0] if id_candidates else cols[0]
     desc_col = desc_candidates[0] if desc_candidates else (cols[1] if len(cols) > 1 else cols[0])
-    return id_col, desc_col
+
+    topic_col = topic_candidates[0] if topic_candidates else None
+    status_col = status_candidates[0] if status_candidates else None
+
+    return id_col, desc_col, topic_col, status_col
 
 def clean_df(df: pd.DataFrame, id_col: str, desc_col: str) -> pd.DataFrame:
     df = df.copy()
@@ -101,23 +126,20 @@ def topk_within_one_file(
     X = vectorizer.fit_transform(texts)  # sparse [N, D]
 
     n = X.shape[0]
-    # +1 because the nearest neighbor is itself (distance 0)
-    k = min(topk + 1, n)
+    k = min(topk + 1, n)  # +1 to include self which we skip
 
     nn = NearestNeighbors(metric="cosine", algorithm="brute", n_neighbors=k, n_jobs=-1)
     nn.fit(X)
 
     distances, indices = nn.kneighbors(X, return_distance=True)
-    # cosine similarity = 1 - cosine distance
     sims = 1.0 - distances
 
-    # Build pairs, enforce canonical ordering to avoid duplicates
     rows = []
-    seen = set()  # set of (min_id, max_id)
+    seen = set()  # (min_id, max_id)
     for i in range(n):
         id_a = ids[i]
         for jpos in range(k):
-            j = indices[i, jpos]
+            j = int(indices[i, jpos])
             if j == i:
                 continue
             sim = float(sims[i, jpos])
@@ -131,8 +153,7 @@ def topk_within_one_file(
             seen.add(key)
             rows.append((a, b, sim))
 
-    out = pd.DataFrame(rows, columns=["ID_A", "ID_B", "similarity"])
-    return out
+    return pd.DataFrame(rows, columns=["ID_A", "ID_B", "similarity"])
 
 def topk_A_vs_B(
     ids_a: list[str],
@@ -162,15 +183,14 @@ def topk_A_vs_B(
     for i in range(XA.shape[0]):
         id_a = ids_a[i]
         for jpos in range(k):
-            j = indices[i, jpos]
+            j = int(indices[i, jpos])
             sim = float(sims[i, jpos])
             if sim < threshold:
                 continue
             id_b = ids_b[j]
             rows.append((id_a, id_b, sim))
 
-    out = pd.DataFrame(rows, columns=["ID_A", "ID_B", "similarity"])
-    return out
+    return pd.DataFrame(rows, columns=["ID_A", "ID_B", "similarity"])
 
 # -------------------------
 # UI controls
@@ -214,12 +234,23 @@ if mode.startswith("One file"):
         st.write("**Preview**")
         st.dataframe(df_raw.head(10), width="stretch")
 
-        id_guess, desc_guess = guess_columns(df_raw)
+        id_guess, desc_guess, topic_guess, status_guess = guess_columns(df_raw)
+
         c1, c2 = st.columns(2)
         with c1:
             id_col = st.selectbox("ID column", df_raw.columns, index=list(df_raw.columns).index(id_guess))
         with c2:
             desc_col = st.selectbox("Description column", df_raw.columns, index=list(df_raw.columns).index(desc_guess))
+
+        c3, c4 = st.columns(2)
+        with c3:
+            topic_options = ["(none)"] + list(df_raw.columns)
+            topic_index = 0 if topic_guess is None else (topic_options.index(topic_guess) if topic_guess in topic_options else 0)
+            topic_col = st.selectbox("Topic column (optional)", topic_options, index=topic_index)
+        with c4:
+            status_options = ["(none)"] + list(df_raw.columns)
+            status_index = 0 if status_guess is None else (status_options.index(status_guess) if status_guess in status_options else 0)
+            status_col = st.selectbox("Status column (optional)", status_options, index=status_index)
 
         df = clean_df(df_raw, id_col, desc_col)
         st.write(f"Usable rows after cleaning: **{len(df):,}**")
@@ -238,11 +269,27 @@ if mode.startswith("One file"):
                 st.info("Computing Top-K neighbors (no NxN matrix)…")
                 pairs = topk_within_one_file(ids, texts, vec, int(topk), float(threshold))
 
-                # Attach descriptions
+                # Attach descriptions + topic/status
                 id_to_desc = dict(zip(ids, texts))
+
+                topic_map = None
+                status_map = None
+                if topic_col != "(none)" and topic_col in df.columns:
+                    topic_map = dict(zip(df[id_col].astype(str), df[topic_col].astype(str).fillna("").tolist()))
+                if status_col != "(none)" and status_col in df.columns:
+                    status_map = dict(zip(df[id_col].astype(str), df[status_col].astype(str).fillna("").tolist()))
+
                 pairs["Desc_A"] = pairs["ID_A"].map(id_to_desc)
                 pairs["Desc_B"] = pairs["ID_B"].map(id_to_desc)
-                pairs = pairs[["ID_A", "Desc_A", "ID_B", "Desc_B", "similarity"]]
+
+                pairs["Topic_A"] = pairs["ID_A"].map(topic_map) if topic_map else ""
+                pairs["Status_A"] = pairs["ID_A"].map(status_map) if status_map else ""
+                pairs["Topic_B"] = pairs["ID_B"].map(topic_map) if topic_map else ""
+                pairs["Status_B"] = pairs["ID_B"].map(status_map) if status_map else ""
+
+                pairs = pairs[
+                    ["ID_A", "Topic_A", "Status_A", "Desc_A", "ID_B", "Topic_B", "Status_B", "Desc_B", "similarity"]
+                ]
 
                 if sort_desc:
                     pairs = pairs.sort_values("similarity", ascending=False)
@@ -250,12 +297,21 @@ if mode.startswith("One file"):
                 st.success(f"Done. Returned **{len(pairs):,}** unique pairs (deduped).")
                 st.dataframe(pairs.head(int(preview_rows)), width="stretch")
 
-                st.download_button(
-                    "⬇️ Download CSV",
-                    data=pairs.to_csv(index=False).encode("utf-8"),
-                    file_name="similarity_topk_onefile.csv",
-                    mime="text/csv",
-                )
+                dl1, dl2 = st.columns(2)
+                with dl1:
+                    st.download_button(
+                        "⬇️ Download CSV",
+                        data=pairs.to_csv(index=False).encode("utf-8"),
+                        file_name="similarity_topk_onefile.csv",
+                        mime="text/csv",
+                    )
+                with dl2:
+                    st.download_button(
+                        "⬇️ Download Excel",
+                        data=to_excel_bytes(pairs, sheet_name="TopK_OneFile"),
+                        file_name="similarity_topk_onefile.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
 
             except Exception:
                 st.error("Compute crashed. Traceback:")
@@ -278,8 +334,8 @@ else:
         st.write("**File B Preview**")
         st.dataframe(dfB_raw.head(8), width="stretch")
 
-        idA_guess, descA_guess = guess_columns(dfA_raw)
-        idB_guess, descB_guess = guess_columns(dfB_raw)
+        idA_guess, descA_guess, topicA_guess, statusA_guess = guess_columns(dfA_raw)
+        idB_guess, descB_guess, topicB_guess, statusB_guess = guess_columns(dfB_raw)
 
         c1, c2 = st.columns(2)
         with c1:
@@ -288,6 +344,22 @@ else:
         with c2:
             idB = st.selectbox("B: ID column", dfB_raw.columns, index=list(dfB_raw.columns).index(idB_guess))
             descB = st.selectbox("B: Description column", dfB_raw.columns, index=list(dfB_raw.columns).index(descB_guess))
+
+        c3, c4 = st.columns(2)
+        with c3:
+            topicA_opts = ["(none)"] + list(dfA_raw.columns)
+            statusA_opts = ["(none)"] + list(dfA_raw.columns)
+            topicA_idx = 0 if topicA_guess is None else (topicA_opts.index(topicA_guess) if topicA_guess in topicA_opts else 0)
+            statusA_idx = 0 if statusA_guess is None else (statusA_opts.index(statusA_guess) if statusA_guess in statusA_opts else 0)
+            topicA = st.selectbox("A: Topic column (optional)", topicA_opts, index=topicA_idx)
+            statusA = st.selectbox("A: Status column (optional)", statusA_opts, index=statusA_idx)
+        with c4:
+            topicB_opts = ["(none)"] + list(dfB_raw.columns)
+            statusB_opts = ["(none)"] + list(dfB_raw.columns)
+            topicB_idx = 0 if topicB_guess is None else (topicB_opts.index(topicB_guess) if topicB_guess in topicB_opts else 0)
+            statusB_idx = 0 if statusB_guess is None else (statusB_opts.index(statusB_guess) if statusB_guess in statusB_opts else 0)
+            topicB = st.selectbox("B: Topic column (optional)", topicB_opts, index=topicB_idx)
+            statusB = st.selectbox("B: Status column (optional)", statusB_opts, index=statusB_idx)
 
         dfA = clean_df(dfA_raw, idA, descA)
         dfB = clean_df(dfB_raw, idB, descB)
@@ -310,11 +382,35 @@ else:
                 pairs = topk_A_vs_B(ids_a, texts_a, ids_b, texts_b, vec, int(topk), float(threshold))
 
                 # Attach descriptions
-                mapA = dict(zip(ids_a, texts_a))
-                mapB = dict(zip(ids_b, texts_b))
-                pairs["Desc_A"] = pairs["ID_A"].map(mapA)
-                pairs["Desc_B"] = pairs["ID_B"].map(mapB)
-                pairs = pairs[["ID_A", "Desc_A", "ID_B", "Desc_B", "similarity"]]
+                mapA_desc = dict(zip(ids_a, texts_a))
+                mapB_desc = dict(zip(ids_b, texts_b))
+
+                # Attach topic/status (optional)
+                mapA_topic = None
+                mapA_status = None
+                mapB_topic = None
+                mapB_status = None
+
+                if topicA != "(none)" and topicA in dfA.columns:
+                    mapA_topic = dict(zip(dfA[idA].astype(str), dfA[topicA].astype(str).fillna("").tolist()))
+                if statusA != "(none)" and statusA in dfA.columns:
+                    mapA_status = dict(zip(dfA[idA].astype(str), dfA[statusA].astype(str).fillna("").tolist()))
+                if topicB != "(none)" and topicB in dfB.columns:
+                    mapB_topic = dict(zip(dfB[idB].astype(str), dfB[topicB].astype(str).fillna("").tolist()))
+                if statusB != "(none)" and statusB in dfB.columns:
+                    mapB_status = dict(zip(dfB[idB].astype(str), dfB[statusB].astype(str).fillna("").tolist()))
+
+                pairs["Desc_A"] = pairs["ID_A"].map(mapA_desc)
+                pairs["Desc_B"] = pairs["ID_B"].map(mapB_desc)
+
+                pairs["Topic_A"] = pairs["ID_A"].map(mapA_topic) if mapA_topic else ""
+                pairs["Status_A"] = pairs["ID_A"].map(mapA_status) if mapA_status else ""
+                pairs["Topic_B"] = pairs["ID_B"].map(mapB_topic) if mapB_topic else ""
+                pairs["Status_B"] = pairs["ID_B"].map(mapB_status) if mapB_status else ""
+
+                pairs = pairs[
+                    ["ID_A", "Topic_A", "Status_A", "Desc_A", "ID_B", "Topic_B", "Status_B", "Desc_B", "similarity"]
+                ]
 
                 if sort_desc:
                     pairs = pairs.sort_values("similarity", ascending=False)
@@ -322,12 +418,21 @@ else:
                 st.success(f"Done. Returned **{len(pairs):,}** A→B matches (Top-K).")
                 st.dataframe(pairs.head(int(preview_rows)), width="stretch")
 
-                st.download_button(
-                    "⬇️ Download CSV",
-                    data=pairs.to_csv(index=False).encode("utf-8"),
-                    file_name="similarity_topk_A_vs_B.csv",
-                    mime="text/csv",
-                )
+                dl1, dl2 = st.columns(2)
+                with dl1:
+                    st.download_button(
+                        "⬇️ Download CSV",
+                        data=pairs.to_csv(index=False).encode("utf-8"),
+                        file_name="similarity_topk_A_vs_B.csv",
+                        mime="text/csv",
+                    )
+                with dl2:
+                    st.download_button(
+                        "⬇️ Download Excel",
+                        data=to_excel_bytes(pairs, sheet_name="TopK_A_vs_B"),
+                        file_name="similarity_topk_A_vs_B.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
 
             except Exception:
                 st.error("Compute crashed. Traceback:")
