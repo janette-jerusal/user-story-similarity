@@ -1,5 +1,6 @@
-# app.py — Streamlit 2026-safe (no use_container_width, no utcnow)
+# app.py — scalable Streamlit similarity (NO NxN matrices)
 import io
+import traceback
 from datetime import datetime, timezone
 from typing import Tuple, Optional
 
@@ -7,34 +8,40 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.neighbors import NearestNeighbors
 
+# -------------------------
+# Streamlit setup
+# -------------------------
 st.set_page_config(page_title="User Story Similarity", layout="wide")
 BUILD_TS = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 st.title("USCAP")
 st.subheader("User Story Comparison Analysis Program")
-st.caption(f"Build: {BUILD_TS} UTC • One-to-one pairs only")
+st.caption(f"Build: {BUILD_TS} UTC • Scalable Top-K (no NxN)")
 
-
+# -------------------------
+# File loading
+# -------------------------
 @st.cache_data(show_spinner=False)
 def read_table_from_bytes(name: str, uploaded_bytes: bytes) -> pd.DataFrame:
     bio = io.BytesIO(uploaded_bytes)
     lower = name.lower()
 
+    # Try Excel first if extension looks like Excel
     if lower.endswith((".xlsx", ".xls")):
         try:
             return pd.read_excel(bio)
         except Exception:
             bio.seek(0)
 
+    # Try CSV
     try:
         bio.seek(0)
         return pd.read_csv(bio)
     except Exception:
         bio.seek(0)
         return pd.read_excel(bio)
-
 
 def guess_columns(df: pd.DataFrame) -> Tuple[str, str]:
     cols = [str(c).strip() for c in df.columns]
@@ -50,6 +57,21 @@ def guess_columns(df: pd.DataFrame) -> Tuple[str, str]:
     desc_col = desc_candidates[0] if desc_candidates else (cols[1] if len(cols) > 1 else cols[0])
     return id_col, desc_col
 
+def clean_df(df: pd.DataFrame, id_col: str, desc_col: str) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    df[id_col] = df[id_col].astype(str).str.strip()
+    df[desc_col] = (
+        df[desc_col]
+        .astype(str)
+        .fillna("")
+        .str.replace(r"\s+", " ", regex=True)
+        .str.strip()
+    )
+
+    df = df[(df[id_col] != "") & (df[desc_col] != "")]
+    df = df.drop_duplicates(subset=[id_col], keep="first").reset_index(drop=True)
+    return df
 
 def build_vectorizer(ngram_min=1, ngram_max=2, min_df=1, max_df=1.0) -> TfidfVectorizer:
     if ngram_max < ngram_min:
@@ -61,56 +83,118 @@ def build_vectorizer(ngram_min=1, ngram_max=2, min_df=1, max_df=1.0) -> TfidfVec
         max_df=float(max_df),
     )
 
+# -------------------------
+# Core scalable similarity
+# -------------------------
+def topk_within_one_file(
+    ids: list[str],
+    texts: list[str],
+    vectorizer: TfidfVectorizer,
+    topk: int,
+    threshold: float,
+) -> pd.DataFrame:
+    """
+    Scalable: compute Top-K nearest neighbors for each row (cosine).
+    Avoids NxN matrix.
+    Returns unique undirected pairs once (ID_A < ID_B).
+    """
+    X = vectorizer.fit_transform(texts)  # sparse [N, D]
 
-def _upper_triangle_long(sim_matrix: np.ndarray, ids) -> pd.DataFrame:
-    sim_df = pd.DataFrame(sim_matrix, index=ids, columns=ids)
-    upper_only = sim_df.where(np.triu(np.ones(sim_df.shape, dtype=bool), k=1))
-    return (
-        upper_only.stack()
-        .reset_index()
-        .rename(columns={"level_0": "ID_A", "level_1": "ID_B", 0: "similarity"})
-    )
+    n = X.shape[0]
+    # +1 because the nearest neighbor is itself (distance 0)
+    k = min(topk + 1, n)
 
+    nn = NearestNeighbors(metric="cosine", algorithm="brute", n_neighbors=k, n_jobs=-1)
+    nn.fit(X)
 
-def _cross_long(sim_matrix: np.ndarray, ids_a, ids_b) -> pd.DataFrame:
-    sim_df = pd.DataFrame(sim_matrix, index=ids_a, columns=ids_b)
-    return (
-        sim_df.stack()
-        .reset_index()
-        .rename(columns={"level_0": "ID_A", "level_1": "ID_B", 0: "similarity"})
-    )
+    distances, indices = nn.kneighbors(X, return_distance=True)
+    # cosine similarity = 1 - cosine distance
+    sims = 1.0 - distances
 
+    # Build pairs, enforce canonical ordering to avoid duplicates
+    rows = []
+    seen = set()  # set of (min_id, max_id)
+    for i in range(n):
+        id_a = ids[i]
+        for jpos in range(k):
+            j = indices[i, jpos]
+            if j == i:
+                continue
+            sim = float(sims[i, jpos])
+            if sim < threshold:
+                continue
+            id_b = ids[j]
+            a, b = (id_a, id_b) if id_a < id_b else (id_b, id_a)
+            key = (a, b)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append((a, b, sim))
 
-def _clean_df(df: pd.DataFrame, id_col: str, desc_col: str) -> pd.DataFrame:
-    df = df.copy()
-    df.columns = [str(c).strip() for c in df.columns]
-    df[id_col] = df[id_col].astype(str).str.strip()
-    df[desc_col] = (
-        df[desc_col]
-        .astype(str)
-        .fillna("")
-        .str.replace(r"\s+", " ", regex=True)
-        .str.strip()
-    )
-    df = df[(df[id_col] != "") & (df[desc_col] != "")]
-    df = df.drop_duplicates(subset=[id_col], keep="first").reset_index(drop=True)
-    return df
+    out = pd.DataFrame(rows, columns=["ID_A", "ID_B", "similarity"])
+    return out
 
+def topk_A_vs_B(
+    ids_a: list[str],
+    texts_a: list[str],
+    ids_b: list[str],
+    texts_b: list[str],
+    vectorizer: TfidfVectorizer,
+    topk: int,
+    threshold: float,
+) -> pd.DataFrame:
+    """
+    Scalable: fit TF-IDF on combined corpus, then index B and query A for Top-K.
+    Avoids full A×B matrix.
+    """
+    vectorizer.fit(texts_a + texts_b)
+    XA = vectorizer.transform(texts_a)
+    XB = vectorizer.transform(texts_b)
 
+    k = min(topk, XB.shape[0])
+    nn = NearestNeighbors(metric="cosine", algorithm="brute", n_neighbors=k, n_jobs=-1)
+    nn.fit(XB)
+
+    distances, indices = nn.kneighbors(XA, return_distance=True)
+    sims = 1.0 - distances
+
+    rows = []
+    for i in range(XA.shape[0]):
+        id_a = ids_a[i]
+        for jpos in range(k):
+            j = indices[i, jpos]
+            sim = float(sims[i, jpos])
+            if sim < threshold:
+                continue
+            id_b = ids_b[j]
+            rows.append((id_a, id_b, sim))
+
+    out = pd.DataFrame(rows, columns=["ID_A", "ID_B", "similarity"])
+    return out
+
+# -------------------------
+# UI controls
+# -------------------------
 mode = st.radio(
     "Comparison mode",
-    ["One file (all vs all, once each)", "Two files (A vs B)"],
+    ["One file (Top-K neighbors)", "Two files (A vs B Top-K)"],
     horizontal=True,
 )
 
 with st.sidebar:
-    st.header("Filters")
+    st.header("Compute settings")
     threshold = st.slider("Similarity threshold", 0.0, 1.0, 0.30, 0.01)
-    topk_per_A = st.number_input("Top-K per ID_A (0 = no limit)", min_value=0, value=0, step=1)
+    topk = st.number_input(
+        "Top-K matches per ID_A",
+        min_value=1,
+        value=10,
+        step=1,
+        help="Scales to huge datasets because we compute only Top-K neighbors (no NxN).",
+    )
     sort_desc = st.checkbox("Sort by similarity (desc)", value=True)
-    show_preview_rows = st.number_input("Preview rows", min_value=10, max_value=200, value=50, step=10)
+    preview_rows = st.number_input("Preview rows", min_value=10, max_value=200, value=50, step=10)
 
-with st.expander("Advanced settings", expanded=False):
+with st.expander("Vectorizer settings (optional)", expanded=False):
     c1, c2, c3 = st.columns(3)
     with c1:
         ngram_min = st.number_input("Min n-gram", 1, 5, 1, 1)
@@ -120,11 +204,14 @@ with st.expander("Advanced settings", expanded=False):
     with c3:
         max_df = st.slider("max_df", 0.1, 1.0, 1.0, 0.05)
 
+# -------------------------
+# ONE FILE
+# -------------------------
 if mode.startswith("One file"):
-    file1 = st.file_uploader("Upload a file (Excel/CSV) with ID and Description columns", type=["xlsx", "xls", "csv"])
+    file1 = st.file_uploader("Upload a file (Excel/CSV)", type=["xlsx", "xls", "csv"], key="one")
     if file1 is not None:
         df_raw = read_table_from_bytes(file1.name, file1.getvalue())
-        st.write("**Data preview**")
+        st.write("**Preview**")
         st.dataframe(df_raw.head(10), width="stretch")
 
         id_guess, desc_guess = guess_columns(df_raw)
@@ -134,33 +221,53 @@ if mode.startswith("One file"):
         with c2:
             desc_col = st.selectbox("Description column", df_raw.columns, index=list(df_raw.columns).index(desc_guess))
 
-        df = _clean_df(df_raw, id_col, desc_col)
-        if st.button("Compute similarities (One file)"):
-            vec = build_vectorizer(ngram_min, ngram_max, min_df, max_df)
-            X = vec.fit_transform(df[desc_col].tolist())
-            if X.shape[0] < 2:
-                st.warning("Need at least 2 stories to compare.")
-            else:
-                sim = cosine_similarity(X, X)
-                pairs = _upper_triangle_long(sim, ids=df[id_col].tolist())
+        df = clean_df(df_raw, id_col, desc_col)
+        st.write(f"Usable rows after cleaning: **{len(df):,}**")
 
-                id_to_desc = dict(zip(df[id_col], df[desc_col]))
+        if st.button("Compute similarities (Top-K)", key="go_one"):
+            try:
+                if len(df) < 2:
+                    st.error("Need at least 2 rows.")
+                    st.stop()
+
+                ids = df[id_col].astype(str).tolist()
+                texts = df[desc_col].astype(str).fillna("").tolist()
+
+                vec = build_vectorizer(ngram_min, ngram_max, min_df, max_df)
+
+                st.info("Computing Top-K neighbors (no NxN matrix)…")
+                pairs = topk_within_one_file(ids, texts, vec, int(topk), float(threshold))
+
+                # Attach descriptions
+                id_to_desc = dict(zip(ids, texts))
                 pairs["Desc_A"] = pairs["ID_A"].map(id_to_desc)
                 pairs["Desc_B"] = pairs["ID_B"].map(id_to_desc)
                 pairs = pairs[["ID_A", "Desc_A", "ID_B", "Desc_B", "similarity"]]
 
-                pairs = pairs[pairs["similarity"] >= threshold]
                 if sort_desc:
                     pairs = pairs.sort_values("similarity", ascending=False)
-                if topk_per_A > 0:
-                    pairs = pairs.groupby("ID_A", as_index=False, sort=False).head(int(topk_per_A))
 
-                st.success(f"Done. {len(pairs):,} unique pairs.")
-                st.dataframe(pairs.head(int(show_preview_rows)), width="stretch")
+                st.success(f"Done. Returned **{len(pairs):,}** unique pairs (deduped).")
+                st.dataframe(pairs.head(int(preview_rows)), width="stretch")
 
+                st.download_button(
+                    "⬇️ Download CSV",
+                    data=pairs.to_csv(index=False).encode("utf-8"),
+                    file_name="similarity_topk_onefile.csv",
+                    mime="text/csv",
+                )
+
+            except Exception:
+                st.error("Compute crashed. Traceback:")
+                st.code(traceback.format_exc())
+                st.stop()
+
+# -------------------------
+# TWO FILES
+# -------------------------
 else:
-    fileA = st.file_uploader("Upload File A (Excel/CSV)", type=["xlsx", "xls", "csv"])
-    fileB = st.file_uploader("Upload File B (Excel/CSV)", type=["xlsx", "xls", "csv"])
+    fileA = st.file_uploader("Upload File A (Excel/CSV)", type=["xlsx", "xls", "csv"], key="A")
+    fileB = st.file_uploader("Upload File B (Excel/CSV)", type=["xlsx", "xls", "csv"], key="B")
 
     if fileA is not None and fileB is not None:
         dfA_raw = read_table_from_bytes(fileA.name, fileA.getvalue())
@@ -176,38 +283,64 @@ else:
 
         c1, c2 = st.columns(2)
         with c1:
-            idA = st.selectbox("File A — ID column", dfA_raw.columns, index=list(dfA_raw.columns).index(idA_guess))
-            descA = st.selectbox("File A — Description column", dfA_raw.columns, index=list(dfA_raw.columns).index(descA_guess))
+            idA = st.selectbox("A: ID column", dfA_raw.columns, index=list(dfA_raw.columns).index(idA_guess))
+            descA = st.selectbox("A: Description column", dfA_raw.columns, index=list(dfA_raw.columns).index(descA_guess))
         with c2:
-            idB = st.selectbox("File B — ID column", dfB_raw.columns, index=list(dfB_raw.columns).index(idB_guess))
-            descB = st.selectbox("File B — Description column", dfB_raw.columns, index=list(dfB_raw.columns).index(descB_guess))
+            idB = st.selectbox("B: ID column", dfB_raw.columns, index=list(dfB_raw.columns).index(idB_guess))
+            descB = st.selectbox("B: Description column", dfB_raw.columns, index=list(dfB_raw.columns).index(descB_guess))
 
-        dfA = _clean_df(dfA_raw, idA, descA)
-        dfB = _clean_df(dfB_raw, idB, descB)
+        dfA = clean_df(dfA_raw, idA, descA)
+        dfB = clean_df(dfB_raw, idB, descB)
+        st.write(f"Usable A rows: **{len(dfA):,}** • Usable B rows: **{len(dfB):,}**")
 
-        if st.button("Compute Similarities (A vs B)"):
-            vec = build_vectorizer(ngram_min, ngram_max, min_df, max_df)
-            combined = pd.concat([dfA[descA], dfB[descB]], ignore_index=True)
-            vec.fit(combined.tolist())
+        if st.button("Compute A vs B (Top-K)", key="go_two"):
+            try:
+                if dfA.empty or dfB.empty:
+                    st.error("No usable rows in A or B after cleaning.")
+                    st.stop()
 
-            XA = vec.transform(dfA[descA].tolist())
-            XB = vec.transform(dfB[descB].tolist())
+                ids_a = dfA[idA].astype(str).tolist()
+                texts_a = dfA[descA].astype(str).fillna("").tolist()
+                ids_b = dfB[idB].astype(str).tolist()
+                texts_b = dfB[descB].astype(str).fillna("").tolist()
 
-            sim = cosine_similarity(XA, XB)
-            pairs = _cross_long(sim, ids_a=dfA[idA].tolist(), ids_b=dfB[idB].tolist())
+                vec = build_vectorizer(ngram_min, ngram_max, min_df, max_df)
 
-            mapA = dict(zip(dfA[idA], dfA[descA]))
-            mapB = dict(zip(dfB[idB], dfB[descB]))
-            pairs["Desc_A"] = pairs["ID_A"].map(mapA)
-            pairs["Desc_B"] = pairs["ID_B"].map(mapB)
+                st.info("Indexing B and querying Top-K for each A (no A×B matrix)…")
+                pairs = topk_A_vs_B(ids_a, texts_a, ids_b, texts_b, vec, int(topk), float(threshold))
 
-            pairs = pairs[["ID_A", "Desc_A", "ID_B", "Desc_B", "similarity"]]
-            pairs = pairs[pairs["similarity"] >= threshold]
+                # Attach descriptions
+                mapA = dict(zip(ids_a, texts_a))
+                mapB = dict(zip(ids_b, texts_b))
+                pairs["Desc_A"] = pairs["ID_A"].map(mapA)
+                pairs["Desc_B"] = pairs["ID_B"].map(mapB)
+                pairs = pairs[["ID_A", "Desc_A", "ID_B", "Desc_B", "similarity"]]
 
-            if sort_desc:
-                pairs = pairs.sort_values("similarity", ascending=False)
-            if topk_per_A > 0:
-                pairs = pairs.groupby("ID_A", as_index=False, sort=False).head(int(topk_per_A))
+                if sort_desc:
+                    pairs = pairs.sort_values("similarity", ascending=False)
 
-            st.success(f"Done. {len(pairs):,} A×B pairs.")
-            st.dataframe(pairs.head(int(show_preview_rows)), width="stretch")
+                st.success(f"Done. Returned **{len(pairs):,}** A→B matches (Top-K).")
+                st.dataframe(pairs.head(int(preview_rows)), width="stretch")
+
+                st.download_button(
+                    "⬇️ Download CSV",
+                    data=pairs.to_csv(index=False).encode("utf-8"),
+                    file_name="similarity_topk_A_vs_B.csv",
+                    mime="text/csv",
+                )
+
+            except Exception:
+                st.error("Compute crashed. Traceback:")
+                st.code(traceback.format_exc())
+                st.stop()
+
+# -------------------------
+# FAQ
+# -------------------------
+with st.expander("FAQ"):
+    st.markdown(
+        "- This version is **scalable** because it never builds an NxN or A×B similarity matrix.\n"
+        "- Increase **Top-K** for more matches per story.\n"
+        "- Increase **threshold** to reduce results.\n"
+        "- For huge files, start with Top-K=5–20."
+    )
