@@ -57,9 +57,35 @@ def read_table_from_bytes(name: str, uploaded_bytes: bytes) -> pd.DataFrame:
         bio.seek(0)
         return pd.read_excel(bio)
 
+def normalize_columns_inplace(df: pd.DataFrame) -> None:
+    """
+    Normalize dataframe column names so guessing + selectboxes are consistent.
+    - Strips whitespace
+    - Forces string type
+    """
+    df.columns = [str(c).strip() for c in df.columns]
+
+def safe_col_index(cols, guess) -> int:
+    """
+    Safe selectbox default index:
+    - returns index of guess if present
+    - else 0
+    Also tries a case-insensitive match.
+    """
+    cols = list(cols)
+    if isinstance(guess, str):
+        if guess in cols:
+            return cols.index(guess)
+        lower_map = {c.lower(): c for c in cols}
+        g = guess.strip().lower()
+        if g in lower_map:
+            return cols.index(lower_map[g])
+    return 0
+
 def guess_columns(df: pd.DataFrame) -> Tuple[str, str, Optional[str], Optional[str]]:
     """
     Returns (id_col, desc_col, topic_col_or_None, status_col_or_None)
+    Assumes df.columns are already normalized with normalize_columns_inplace().
     """
     cols = [str(c).strip() for c in df.columns]
     norm = {c: c.lower().strip() for c in cols}
@@ -231,6 +257,12 @@ if mode.startswith("One file"):
     file1 = st.file_uploader("Upload a file (Excel/CSV)", type=["xlsx", "xls", "csv"], key="one")
     if file1 is not None:
         df_raw = read_table_from_bytes(file1.name, file1.getvalue())
+        normalize_columns_inplace(df_raw)
+
+        if len(df_raw.columns) == 0:
+            st.error("No columns found in the uploaded file.")
+            st.stop()
+
         st.write("**Preview**")
         st.dataframe(df_raw.head(10), width="stretch")
 
@@ -238,9 +270,9 @@ if mode.startswith("One file"):
 
         c1, c2 = st.columns(2)
         with c1:
-            id_col = st.selectbox("ID column", df_raw.columns, index=list(df_raw.columns).index(id_guess))
+            id_col = st.selectbox("ID column", df_raw.columns, index=safe_col_index(df_raw.columns, id_guess))
         with c2:
-            desc_col = st.selectbox("Description column", df_raw.columns, index=list(df_raw.columns).index(desc_guess))
+            desc_col = st.selectbox("Description column", df_raw.columns, index=safe_col_index(df_raw.columns, desc_guess))
 
         c3, c4 = st.columns(2)
         with c3:
@@ -328,6 +360,12 @@ else:
     if fileA is not None and fileB is not None:
         dfA_raw = read_table_from_bytes(fileA.name, fileA.getvalue())
         dfB_raw = read_table_from_bytes(fileB.name, fileB.getvalue())
+        normalize_columns_inplace(dfA_raw)
+        normalize_columns_inplace(dfB_raw)
+
+        if len(dfA_raw.columns) == 0 or len(dfB_raw.columns) == 0:
+            st.error("One of the uploaded files has no columns.")
+            st.stop()
 
         st.write("**File A Preview**")
         st.dataframe(dfA_raw.head(8), width="stretch")
@@ -339,11 +377,11 @@ else:
 
         c1, c2 = st.columns(2)
         with c1:
-            idA = st.selectbox("A: ID column", dfA_raw.columns, index=list(dfA_raw.columns).index(idA_guess))
-            descA = st.selectbox("A: Description column", dfA_raw.columns, index=list(dfA_raw.columns).index(descA_guess))
+            idA = st.selectbox("A: ID column", dfA_raw.columns, index=safe_col_index(dfA_raw.columns, idA_guess))
+            descA = st.selectbox("A: Description column", dfA_raw.columns, index=safe_col_index(dfA_raw.columns, descA_guess))
         with c2:
-            idB = st.selectbox("B: ID column", dfB_raw.columns, index=list(dfB_raw.columns).index(idB_guess))
-            descB = st.selectbox("B: Description column", dfB_raw.columns, index=list(dfB_raw.columns).index(descB_guess))
+            idB = st.selectbox("B: ID column", dfB_raw.columns, index=safe_col_index(dfB_raw.columns, idB_guess))
+            descB = st.selectbox("B: Description column", dfB_raw.columns, index=safe_col_index(dfB_raw.columns, descB_guess))
 
         c3, c4 = st.columns(2)
         with c3:
