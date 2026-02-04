@@ -31,13 +31,16 @@ def make_arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
     - drop timezone from tz-aware datetimes
     - stringify cells that are lists/dicts/sets/tuples/etc
     - if an object column still has mixed python types, cast column to string
+
+    Also robust to duplicate column names (df[col] returning a DataFrame).
     """
     out = df.copy()
 
     # tz-aware datetimes -> naive
     for col in out.columns:
-        if pd.api.types.is_datetime64tz_dtype(out[col]):
-            out[col] = out[col].dt.tz_convert(None)
+        s = out[col]
+        if isinstance(s, pd.Series) and pd.api.types.is_datetime64tz_dtype(s):
+            out[col] = s.dt.tz_convert(None)
 
     def safe_cell(x):
         if isinstance(x, (list, dict, set, tuple)):
@@ -48,12 +51,31 @@ def make_arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
         return x
 
     for col in out.columns:
-        if out[col].dtype == "object":
-            out[col] = out[col].map(safe_cell)
+        s = out[col]
 
-            types = out[col].dropna().map(type).unique()
+        # If duplicate columns exist, pandas returns a DataFrame here.
+        if isinstance(s, pd.DataFrame):
+            # Sanitize each duplicate column separately
+            for subcol in s.columns:
+                ser = s[subcol]
+                if pd.api.types.is_datetime64tz_dtype(ser):
+                    ser = ser.dt.tz_convert(None)
+                if ser.dtype == "object":
+                    ser2 = ser.map(safe_cell)
+                    types = ser2.dropna().map(type).unique()
+                    if len(types) > 1:
+                        ser2 = ser2.astype("string")
+                    s[subcol] = ser2
+            out[col] = s
+            continue
+
+        # Normal Series path
+        if isinstance(s, pd.Series) and s.dtype == "object":
+            s2 = s.map(safe_cell)
+            types = s2.dropna().map(type).unique()
             if len(types) > 1:
-                out[col] = out[col].astype("string")
+                s2 = s2.astype("string")
+            out[col] = s2
 
     return out
 
@@ -99,8 +121,21 @@ def normalize_columns_inplace(df: pd.DataFrame) -> None:
     Normalize dataframe column names so guessing + selectboxes are consistent.
     - Strips whitespace
     - Forces string type
+    - Makes names UNIQUE (fixes df[col] returning a DataFrame when duplicates exist)
     """
-    df.columns = [str(c).strip() for c in df.columns]
+    cols = [str(c).strip() for c in df.columns]
+
+    seen = {}
+    unique_cols = []
+    for c in cols:
+        if c not in seen:
+            seen[c] = 1
+            unique_cols.append(c)
+        else:
+            seen[c] += 1
+            unique_cols.append(f"{c}__{seen[c]}")
+
+    df.columns = unique_cols
 
 def safe_col_index(cols, guess) -> int:
     """
@@ -524,3 +559,4 @@ with st.expander("FAQ"):
         "- Increase **threshold** to reduce results.\n"
         "- For huge files, start with Top-K=5–20."
     )
+
