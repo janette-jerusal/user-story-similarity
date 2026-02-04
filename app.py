@@ -1,5 +1,7 @@
 # app.py — scalable Streamlit similarity (NO NxN matrices) + Topic/Status + Excel export
+
 import io
+import json
 import traceback
 from datetime import datetime, timezone
 from typing import Tuple, Optional
@@ -19,6 +21,41 @@ BUILD_TS = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 st.title("USCAP")
 st.subheader("User Story Comparison Analysis Program")
 st.caption(f"Build: {BUILD_TS} UTC • Scalable Top-K (no NxN)")
+
+# -------------------------
+# Arrow-safe display helper (fixes st.dataframe PyArrow crashes)
+# -------------------------
+def make_arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Make a pandas DF safe for st.dataframe / Arrow:
+    - drop timezone from tz-aware datetimes
+    - stringify cells that are lists/dicts/sets/tuples/etc
+    - if an object column still has mixed python types, cast column to string
+    """
+    out = df.copy()
+
+    # tz-aware datetimes -> naive
+    for col in out.columns:
+        if pd.api.types.is_datetime64tz_dtype(out[col]):
+            out[col] = out[col].dt.tz_convert(None)
+
+    def safe_cell(x):
+        if isinstance(x, (list, dict, set, tuple)):
+            try:
+                return json.dumps(x, default=str)
+            except Exception:
+                return str(x)
+        return x
+
+    for col in out.columns:
+        if out[col].dtype == "object":
+            out[col] = out[col].map(safe_cell)
+
+            types = out[col].dropna().map(type).unique()
+            if len(types) > 1:
+                out[col] = out[col].astype("string")
+
+    return out
 
 # -------------------------
 # Excel export helper
@@ -264,7 +301,7 @@ if mode.startswith("One file"):
             st.stop()
 
         st.write("**Preview**")
-        st.dataframe(df_raw.head(10), width="stretch")
+        st.dataframe(make_arrow_safe(df_raw.head(10)), use_container_width=True)
 
         id_guess, desc_guess, topic_guess, status_guess = guess_columns(df_raw)
 
@@ -327,7 +364,7 @@ if mode.startswith("One file"):
                     pairs = pairs.sort_values("similarity", ascending=False)
 
                 st.success(f"Done. Returned **{len(pairs):,}** unique pairs (deduped).")
-                st.dataframe(pairs.head(int(preview_rows)), width="stretch")
+                st.dataframe(make_arrow_safe(pairs.head(int(preview_rows))), use_container_width=True)
 
                 dl1, dl2 = st.columns(2)
                 with dl1:
@@ -368,9 +405,9 @@ else:
             st.stop()
 
         st.write("**File A Preview**")
-        st.dataframe(dfA_raw.head(8), width="stretch")
+        st.dataframe(make_arrow_safe(dfA_raw.head(8)), use_container_width=True)
         st.write("**File B Preview**")
-        st.dataframe(dfB_raw.head(8), width="stretch")
+        st.dataframe(make_arrow_safe(dfB_raw.head(8)), use_container_width=True)
 
         idA_guess, descA_guess, topicA_guess, statusA_guess = guess_columns(dfA_raw)
         idB_guess, descB_guess, topicB_guess, statusB_guess = guess_columns(dfB_raw)
@@ -454,7 +491,7 @@ else:
                     pairs = pairs.sort_values("similarity", ascending=False)
 
                 st.success(f"Done. Returned **{len(pairs):,}** A→B matches (Top-K).")
-                st.dataframe(pairs.head(int(preview_rows)), width="stretch")
+                st.dataframe(make_arrow_safe(pairs.head(int(preview_rows))), use_container_width=True)
 
                 dl1, dl2 = st.columns(2)
                 with dl1:
