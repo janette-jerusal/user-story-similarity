@@ -1,336 +1,131 @@
-# app.py — scalable Streamlit similarity (NO NxN matrices)
-# Arrow-safe + Duplicate-column-safe + Topic/Status + Excel export
+# app.py — Keyword Search Tool (Duplicate-column safe)
 
-import io
-import json
-import traceback
-from datetime import datetime, timezone
-from typing import Tuple, Optional
-
-import numpy as np
-import pandas as pd
 import streamlit as st
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.neighbors import NearestNeighbors
+import pandas as pd
+import numpy as np
 
+st.set_page_config(page_title="Keyword Search", layout="wide")
 
-# =========================================================
-# Streamlit Setup
-# =========================================================
-st.set_page_config(page_title="User Story Similarity", layout="wide")
+st.title("Keyword Search Tool")
 
-BUILD_TS = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-
-st.title("USCAP")
-st.subheader("User Story Comparison Analysis Program")
-st.caption(f"Build: {BUILD_TS} UTC • Scalable Top-K (no NxN matrices)")
-
-
-# =========================================================
-# Utilities
-# =========================================================
+# =====================================================
+# Helpers
+# =====================================================
 
 def ensure_unique_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Guarantee unique column names (prevents Arrow duplicate crash)."""
+    """Force unique column names (required by PyArrow)."""
     df = df.copy()
     seen = {}
     new_cols = []
-    for c in df.columns:
-        c = str(c).strip()
-        if c not in seen:
-            seen[c] = 1
-            new_cols.append(c)
+
+    for col in df.columns:
+        col = str(col).strip()
+        if col not in seen:
+            seen[col] = 1
+            new_cols.append(col)
         else:
-            seen[c] += 1
-            new_cols.append(f"{c}__{seen[c]}")
+            seen[col] += 1
+            new_cols.append(f"{col}__{seen[col]}")
+
     df.columns = new_cols
     return df
 
 
-def make_arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
+def safe_dataframe(df: pd.DataFrame):
     """
-    Make DataFrame safe for st.dataframe / PyArrow.
-    - Ensures unique columns
-    - Removes timezone info
-    - Converts complex objects to strings
+    Safely display a dataframe in Streamlit.
+    Removes duplicate columns before rendering.
     """
-    out = ensure_unique_columns(df)
-
-    # Remove timezone from datetime columns
-    for col in out.columns:
-        if pd.api.types.is_datetime64tz_dtype(out[col]):
-            out[col] = out[col].dt.tz_convert(None)
-
-    def safe_cell(x):
-        if isinstance(x, (list, dict, set, tuple)):
-            try:
-                return json.dumps(x, default=str)
-            except Exception:
-                return str(x)
-        return x
-
-    for col in out.columns:
-        if out[col].dtype == "object":
-            col2 = out[col].map(safe_cell)
-            if len(col2.dropna().map(type).unique()) > 1:
-                col2 = col2.astype("string")
-            out[col] = col2
-
-    return out
+    df = ensure_unique_columns(df)
+    df = df.loc[:, ~df.columns.duplicated()]
+    st.dataframe(df, use_container_width=True)
 
 
-def to_excel_bytes(df: pd.DataFrame, sheet_name="results") -> bytes:
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name=sheet_name[:31])
-    buffer.seek(0)
-    return buffer.read()
+# =====================================================
+# File Upload
+# =====================================================
 
-
-@st.cache_data(show_spinner=False)
-def read_table(name: str, data: bytes) -> pd.DataFrame:
-    bio = io.BytesIO(data)
-    name = name.lower()
-
-    if name.endswith((".xlsx", ".xls")):
-        try:
-            return pd.read_excel(bio)
-        except Exception:
-            bio.seek(0)
-
-    try:
-        return pd.read_csv(bio)
-    except Exception:
-        bio.seek(0)
-        return pd.read_excel(bio)
-
-
-def clean_df(df: pd.DataFrame, id_col: str, desc_col: str) -> pd.DataFrame:
-    df = df.copy()
-    df[id_col] = df[id_col].astype(str).str.strip()
-    df[desc_col] = (
-        df[desc_col]
-        .astype(str)
-        .fillna("")
-        .str.replace(r"\s+", " ", regex=True)
-        .str.strip()
-    )
-
-    df = df[(df[id_col] != "") & (df[desc_col] != "")]
-    df = df.drop_duplicates(subset=[id_col], keep="first")
-    return df.reset_index(drop=True)
-
-
-def build_vectorizer(ngram_min, ngram_max, min_df, max_df):
-    if ngram_max < ngram_min:
-        ngram_max = ngram_min
-    return TfidfVectorizer(
-        stop_words="english",
-        ngram_range=(int(ngram_min), int(ngram_max)),
-        min_df=int(min_df),
-        max_df=float(max_df),
-    )
-
-
-# =========================================================
-# Scalable Similarity (Top-K only)
-# =========================================================
-
-def topk_within(ids, texts, vectorizer, topk, threshold):
-    X = vectorizer.fit_transform(texts)
-    n = X.shape[0]
-    k = min(topk + 1, n)
-
-    nn = NearestNeighbors(metric="cosine", algorithm="brute", n_neighbors=k)
-    nn.fit(X)
-
-    distances, indices = nn.kneighbors(X)
-    sims = 1 - distances
-
-    rows = []
-    seen = set()
-
-    for i in range(n):
-        id_a = ids[i]
-        for jpos in range(k):
-            j = indices[i, jpos]
-            if j == i:
-                continue
-            sim = float(sims[i, jpos])
-            if sim < threshold:
-                continue
-            id_b = ids[j]
-            a, b = sorted([id_a, id_b])
-            if (a, b) not in seen:
-                seen.add((a, b))
-                rows.append((a, b, sim))
-
-    return pd.DataFrame(rows, columns=["ID_A", "ID_B", "similarity"])
-
-
-def topk_A_vs_B(ids_a, texts_a, ids_b, texts_b, vectorizer, topk, threshold):
-    vectorizer.fit(texts_a + texts_b)
-    XA = vectorizer.transform(texts_a)
-    XB = vectorizer.transform(texts_b)
-
-    k = min(topk, XB.shape[0])
-
-    nn = NearestNeighbors(metric="cosine", algorithm="brute", n_neighbors=k)
-    nn.fit(XB)
-
-    distances, indices = nn.kneighbors(XA)
-    sims = 1 - distances
-
-    rows = []
-    for i in range(XA.shape[0]):
-        id_a = ids_a[i]
-        for jpos in range(k):
-            j = indices[i, jpos]
-            sim = float(sims[i, jpos])
-            if sim >= threshold:
-                rows.append((id_a, ids_b[j], sim))
-
-    return pd.DataFrame(rows, columns=["ID_A", "ID_B", "similarity"])
-
-
-# =========================================================
-# UI
-# =========================================================
-
-mode = st.radio(
-    "Comparison mode",
-    ["One file (Top-K neighbors)", "Two files (A vs B Top-K)"],
-    horizontal=True,
+uploaded_file = st.file_uploader(
+    "Upload CSV or Excel file",
+    type=["csv", "xlsx", "xls"]
 )
 
-with st.sidebar:
-    st.header("Compute Settings")
-    threshold = st.slider("Similarity threshold", 0.0, 1.0, 0.30, 0.01)
-    topk = st.number_input("Top-K per ID_A", min_value=1, value=10)
-    preview_rows = st.number_input("Preview rows", min_value=10, max_value=200, value=50)
-    sort_desc = st.checkbox("Sort descending", value=True)
+if uploaded_file is not None:
+
+    # Read file
+    try:
+        if uploaded_file.name.endswith(("xlsx", "xls")):
+            df = pd.read_excel(uploaded_file)
+        else:
+            df = pd.read_csv(uploaded_file)
+    except Exception as e:
+        st.error(f"Error reading file: {e}")
+        st.stop()
+
+    df = ensure_unique_columns(df)
+
+    st.subheader("Preview (First 10 Rows)")
+    safe_dataframe(df.head(10))
 
     st.divider()
-    st.subheader("Vectorizer Settings")
-    ngram_min = st.number_input("Min n-gram", 1, 5, 1)
-    ngram_max = st.number_input("Max n-gram", 1, 5, 2)
-    min_df = st.number_input("min_df", 1, value=1)
-    max_df = st.slider("max_df", 0.1, 1.0, 1.0, 0.05)
 
+    # =====================================================
+    # Column Selection
+    # =====================================================
 
-# =========================================================
-# ONE FILE MODE
-# =========================================================
+    st.subheader("Select Columns")
 
-if mode.startswith("One"):
-    file = st.file_uploader("Upload file (Excel/CSV)", type=["xlsx", "xls", "csv"])
+    columns = list(df.columns)
 
-    if file:
-        df_raw = ensure_unique_columns(read_table(file.name, file.getvalue()))
+    keyword_col = st.selectbox("Keyword Column", columns)
+    retain_cols = st.multiselect(
+        "Columns to Display",
+        columns,
+        default=columns
+    )
 
-        st.write("Preview")
-        st.dataframe(make_arrow_safe(df_raw.head(10)), use_container_width=True)
+    # Remove duplicates from retain_cols (just in case)
+    retain_cols = list(dict.fromkeys(retain_cols))
 
-        id_col = st.selectbox("ID column", df_raw.columns)
-        desc_col = st.selectbox("Description column", df_raw.columns)
+    # =====================================================
+    # Filtering
+    # =====================================================
 
-        df = clean_df(df_raw, id_col, desc_col)
-        st.write(f"Usable rows: {len(df):,}")
+    st.subheader("Keyword Filter")
 
-        if st.button("Compute Similarities"):
-            vec = build_vectorizer(ngram_min, ngram_max, min_df, max_df)
-            pairs = topk_within(
-                df[id_col].tolist(),
-                df[desc_col].tolist(),
-                vec,
-                int(topk),
-                float(threshold),
-            )
+    search_term = st.text_input("Enter keyword to search")
 
-            id_to_desc = dict(zip(df[id_col], df[desc_col]))
-            pairs["Desc_A"] = pairs["ID_A"].map(id_to_desc)
-            pairs["Desc_B"] = pairs["ID_B"].map(id_to_desc)
+    if search_term:
+        filtered_df = df[df[keyword_col].astype(str).str.contains(
+            search_term,
+            case=False,
+            na=False
+        )]
+    else:
+        filtered_df = df.copy()
 
-            if sort_desc:
-                pairs = pairs.sort_values("similarity", ascending=False)
+    # Ensure retain_cols exist
+    retain_cols = [c for c in retain_cols if c in filtered_df.columns]
 
-            st.success(f"Returned {len(pairs):,} pairs")
-            st.dataframe(make_arrow_safe(pairs.head(int(preview_rows))), use_container_width=True)
+    combined_df = filtered_df[retain_cols].copy()
 
-            st.download_button(
-                "Download CSV",
-                pairs.to_csv(index=False).encode(),
-                "similarity_onefile.csv",
-            )
+    # 🔥 CRITICAL FIX: ensure no duplicate columns before displaying
+    combined_df = ensure_unique_columns(combined_df)
+    combined_df = combined_df.loc[:, ~combined_df.columns.duplicated()]
 
-            st.download_button(
-                "Download Excel",
-                to_excel_bytes(pairs, "TopK_OneFile"),
-                "similarity_onefile.xlsx",
-            )
+    st.subheader("Filtered Results (Top 10)")
+    safe_dataframe(combined_df.head(10))
 
+    # =====================================================
+    # Download Option
+    # =====================================================
 
-# =========================================================
-# TWO FILE MODE
-# =========================================================
+    st.download_button(
+        "Download Filtered CSV",
+        combined_df.to_csv(index=False).encode("utf-8"),
+        file_name="filtered_keywords.csv",
+        mime="text/csv"
+    )
 
 else:
-    fileA = st.file_uploader("Upload File A", type=["xlsx", "xls", "csv"], key="A")
-    fileB = st.file_uploader("Upload File B", type=["xlsx", "xls", "csv"], key="B")
-
-    if fileA and fileB:
-        dfA = ensure_unique_columns(read_table(fileA.name, fileA.getvalue()))
-        dfB = ensure_unique_columns(read_table(fileB.name, fileB.getvalue()))
-
-        st.write("File A Preview")
-        st.dataframe(make_arrow_safe(dfA.head()), use_container_width=True)
-
-        st.write("File B Preview")
-        st.dataframe(make_arrow_safe(dfB.head()), use_container_width=True)
-
-        idA = st.selectbox("A: ID column", dfA.columns)
-        descA = st.selectbox("A: Description column", dfA.columns)
-
-        idB = st.selectbox("B: ID column", dfB.columns)
-        descB = st.selectbox("B: Description column", dfB.columns)
-
-        dfA = clean_df(dfA, idA, descA)
-        dfB = clean_df(dfB, idB, descB)
-
-        if st.button("Compute A vs B"):
-            vec = build_vectorizer(ngram_min, ngram_max, min_df, max_df)
-
-            pairs = topk_A_vs_B(
-                dfA[idA].tolist(),
-                dfA[descA].tolist(),
-                dfB[idB].tolist(),
-                dfB[descB].tolist(),
-                vec,
-                int(topk),
-                float(threshold),
-            )
-
-            mapA = dict(zip(dfA[idA], dfA[descA]))
-            mapB = dict(zip(dfB[idB], dfB[descB]))
-
-            pairs["Desc_A"] = pairs["ID_A"].map(mapA)
-            pairs["Desc_B"] = pairs["ID_B"].map(mapB)
-
-            if sort_desc:
-                pairs = pairs.sort_values("similarity", ascending=False)
-
-            st.success(f"Returned {len(pairs):,} matches")
-            st.dataframe(make_arrow_safe(pairs.head(int(preview_rows))), use_container_width=True)
-
-            st.download_button(
-                "Download CSV",
-                pairs.to_csv(index=False).encode(),
-                "similarity_A_vs_B.csv",
-            )
-
-            st.download_button(
-                "Download Excel",
-                to_excel_bytes(pairs, "TopK_A_vs_B"),
-                "similarity_A_vs_B.xlsx",
-            )
-
+    st.info("Upload a file to begin.")
